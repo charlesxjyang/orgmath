@@ -439,9 +439,6 @@ function mathDecorations(view) {
   function addIfNoOverlap(from, to, widget) {
     for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
     if (cursorInside(sel, from, to)) return;
-    // Skip multi-line replacements - they conflict with Yjs collaboration
-    const text = doc.slice(from, to);
-    if (text.includes('\n')) return;
     mathRanges.push({ from, to });
     widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
   }
@@ -488,6 +485,7 @@ function orgDecorations(view) {
     const line = doc.line(i);
     const text = line.text;
 
+    // Org-mode headings: * Heading
     const hm = text.match(/^(\*{1,6})\s+(.*)$/);
     if (hm) {
       const level = hm[1].length;
@@ -499,6 +497,16 @@ function orgDecorations(view) {
       const dm = after.match(/^(DONE|CANCELLED)\s/);
       if (tm) decos.push(Decoration.mark({ class: 'cm-org-todo' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + tm[1].length));
       else if (dm) decos.push(Decoration.mark({ class: 'cm-org-done' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + dm[1].length));
+      continue;
+    }
+
+    // Markdown headings: # Heading, ## Heading, etc.
+    const mdh = text.match(/^(#{1,6})\s+(.*)$/);
+    if (mdh) {
+      const level = mdh[1].length;
+      const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
+      decos.push(Decoration.line({ class: cls }).range(line.from));
+      decos.push(Decoration.mark({ class: 'cm-org-stars' }).range(line.from, line.from + mdh[1].length));
       continue;
     }
 
@@ -516,16 +524,35 @@ function orgDecorations(view) {
     if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) { decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from)); continue; }
     if (text.match(/^\s*#\+/i)) { decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from)); continue; }
 
+    // Markdown bold: **text**
+    const mdbr = /\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/g; let mdbm;
+    while ((mdbm = mdbr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(line.from + mdbm.index, line.from + mdbm.index + mdbm[0].length));
+
+    // Markdown italic: _text_
+    const mdir = /(?<!\w)_([^\s_](?:[^_]*[^\s_])?)_(?!\w)/g; let mdim;
+    while ((mdim = mdir.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(line.from + mdim.index, line.from + mdim.index + mdim[0].length));
+
+    // Markdown code: `text`
+    const mdcr = /`([^`]+)`/g; let mdcm;
+    while ((mdcm = mdcr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-code' }).range(line.from + mdcm.index, line.from + mdcm.index + mdcm[0].length));
+
+    // Org-mode bold: *text* (but not on heading lines)
     if (!text.match(/^\*+\s/)) {
-      const br = /(?<!\w)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\w)/g; let bm;
+      const br = /(?<!\w)(?<!\*)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\*)(?!\w)/g; let bm;
       while ((bm = br.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(line.from + bm.index, line.from + bm.index + bm[0].length));
     }
+    // Org-mode italic: /text/
     const ir = /(?<!\w)\/([^\s/](?:[^/]*[^\s/])?)\/(?!\w)/g; let im;
     while ((im = ir.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(line.from + im.index, line.from + im.index + im[0].length));
+    // Org-mode code: ~text~ or =text=
     const cr = /(?<!\w)[~=]([^\s~=](?:[^~=]*[^\s~=])?)[~=](?!\w)/g; let cm;
     while ((cm = cr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-code' }).range(line.from + cm.index, line.from + cm.index + cm[0].length));
+    // Org-mode links: [[url][label]]
     const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
     while ((lm = lr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + lm.index, line.from + lm.index + lm[0].length));
+    // Markdown links: [label](url)
+    const mdlr = /\[([^\]]+)\]\(([^)]+)\)/g; let mdlm;
+    while ((mdlm = mdlr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + mdlm.index, line.from + mdlm.index + mdlm[0].length));
   }
   return Decoration.set(decos, true);
 }
