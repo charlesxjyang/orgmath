@@ -436,11 +436,21 @@ function mathDecorations(view) {
   const sel = view.state.selection.main;
   const mathRanges = [];
 
-  function addIfNoOverlap(from, to, widget) {
+  // For single-line: replace with rendered widget
+  // For multi-line: show widget AFTER the block (can't replace across line breaks with Yjs)
+  function addMath(from, to, widget, content) {
     for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
     if (cursorInside(sel, from, to)) return;
     mathRanges.push({ from, to });
-    widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
+
+    const isMultiLine = content.includes('\n');
+    if (isMultiLine) {
+      // Show widget after the block
+      widgets.push(Decoration.widget({ widget, block: true }).range(to));
+    } else {
+      // Replace inline
+      widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
+    }
   }
 
   for (const env of MATH_ENVS) {
@@ -448,22 +458,22 @@ function mathDecorations(view) {
     const re = new RegExp(`\\\\begin\\{${envEsc}\\}([\\s\\S]*?)\\\\end\\{${envEsc}\\}`, 'g');
     let m;
     while ((m = re.exec(doc)) !== null) {
-      addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1], true, env.replace(/\\\*/g, '*')));
+      addMath(m.index, m.index + m[0].length, new MathWidget(m[1], true, env.replace(/\\\*/g, '*')), m[0]);
     }
   }
 
   let m;
   const blockRe = /\$\$([\s\S]+?)\$\$/g;
-  while ((m = blockRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true));
+  while ((m = blockRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true), m[0]);
 
   const bracketRe = /\\\[([\s\S]+?)\\\]/g;
-  while ((m = bracketRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true));
+  while ((m = bracketRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true), m[0]);
 
   const inlineRe = /(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)/g;
-  while ((m = inlineRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1], false));
+  while ((m = inlineRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1], false), m[0]);
 
   const parenRe = /\\\(([\s\S]+?)\\\)/g;
-  while ((m = parenRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), false));
+  while ((m = parenRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), false), m[0]);
 
   return Decoration.set(widgets, true);
 }
