@@ -439,6 +439,9 @@ function mathDecorations(view) {
   function addIfNoOverlap(from, to, widget) {
     for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
     if (cursorInside(sel, from, to)) return;
+    // Skip multi-line replacements - they conflict with Yjs collaboration
+    const text = doc.slice(from, to);
+    if (text.includes('\n')) return;
     mathRanges.push({ from, to });
     widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
   }
