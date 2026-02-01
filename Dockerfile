@@ -16,6 +16,4 @@ ENV MAX_ROOMS=200
 
 EXPOSE 4000
 
-VOLUME ["/app/data"]
-
 CMD ["node", "index.js"]
