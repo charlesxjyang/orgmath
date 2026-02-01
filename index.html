@@ -323,7 +323,7 @@ const params = new URLSearchParams(location.search);
 const DEFAULT_SERVER = params.get('server') ||
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
     ? `ws://${location.hostname}:4000`
-    : `wss://${location.hostname.replace(/^www\./, '')}:4000`);
+    : `wss://orgmath-server-production.up.railway.app`);
 
 // ─── Utility ───
 const PEER_COLORS = ['#c05030','#3070c0','#30a060','#a050b0','#c08020','#2090a0','#d04080','#607020'];
