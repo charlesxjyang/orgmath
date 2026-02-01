@@ -800,13 +800,6 @@ function initEditor(room, username, serverUrl) {
   provider.on('status', ({ status }) => updateStatus(status));
   updateStatus('connecting');
 
-  // Seed default doc if empty (only first peer)
-  provider.on('sync', (synced) => {
-    if (synced && ytext.toString() === '') {
-      ytext.insert(0, DEFAULT_DOC);
-    }
-  });
-
   // Peer dots
   function updatePeers() {
     const states = Array.from(awareness.getStates().values());
@@ -823,30 +816,43 @@ function initEditor(room, username, serverUrl) {
   awareness.on('change', updatePeers);
   updatePeers();
 
-  const undoManager = new Y.UndoManager(ytext);
-
   const theme = EditorView.theme({
     '&': { backgroundColor: 'transparent' },
     '.cm-scroller': { fontFamily: 'var(--font-serif)', lineHeight: '1.7' },
     '.cm-foldPlaceholder': { fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--fg-faint)', backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border)', padding: '0 6px', borderRadius: '3px', margin: '0 4px' }
   });
 
-  const state = EditorState.create({
-    doc: ytext.toString(),
-    extensions: [
-      theme, orgPlugin, mathPlugin, orgFoldService, codeFolding(), orgKeymap,
-      keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
-      yCollab(ytext, awareness, { undoManager }),
-      EditorView.lineWrapping,
-    ]
-  });
+  // Wait for sync before creating editor to ensure proper Yjs binding
+  provider.on('sync', (synced) => {
+    if (!synced) return;
 
-  editorView = new EditorView({
-    state,
-    parent: document.getElementById('editor')
-  });
+    // Seed default doc if empty (only first peer)
+    if (ytext.toString() === '') {
+      ytext.insert(0, DEFAULT_DOC);
+    }
 
-  editorView.focus();
+    // Only create editor once
+    if (editorView) return;
+
+    const undoManager = new Y.UndoManager(ytext);
+
+    const state = EditorState.create({
+      doc: ytext.toString(),
+      extensions: [
+        theme, orgPlugin, mathPlugin, orgFoldService, codeFolding(), orgKeymap,
+        keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        yCollab(ytext, awareness, { undoManager }),
+        EditorView.lineWrapping,
+      ]
+    });
+
+    editorView = new EditorView({
+      state,
+      parent: document.getElementById('editor')
+    });
+
+    editorView.focus();
+  });
 }
 </script>
 </body>
