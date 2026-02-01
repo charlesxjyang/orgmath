@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: orgmath-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 4000
+      - key: MAX_ROOMS
+        value: 200
+    disk:
+      name: orgmath-data
+      mountPath: /app/data
+      sizeGB: 1
+    healthCheckPath: /health

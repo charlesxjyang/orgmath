@@ -1,0 +1,16 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    volumes:
+      - orgmath-data:/app/data
+    environment:
+      - PORT=4000
+      - MAX_ROOMS=200
+    restart: unless-stopped
+
+volumes:
+  orgmath-data:

@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OrgMath — Collaborative Math Editor</title>
+
+<!-- KaTeX -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+
+<!-- CodeMirror 6 + Yjs -->
+<script type="importmap">
+{
+  "imports": {
+    "@codemirror/state": "https://esm.sh/@codemirror/state@6.4.1",
+    "@codemirror/view": "https://esm.sh/@codemirror/view@6.26.3",
+    "@codemirror/language": "https://esm.sh/@codemirror/language@6.10.1",
+    "@codemirror/commands": "https://esm.sh/@codemirror/commands@6.3.3",
+    "@codemirror/search": "https://esm.sh/@codemirror/search@6.5.6",
+    "@codemirror/autocomplete": "https://esm.sh/@codemirror/autocomplete@6.15.0",
+    "@codemirror/history": "https://esm.sh/@codemirror/history@0.19.2",
+    "@lezer/common": "https://esm.sh/@lezer/common@1.2.1",
+    "@lezer/highlight": "https://esm.sh/@lezer/highlight@1.2.0",
+    "@lezer/lr": "https://esm.sh/@lezer/lr@1.4.0",
+    "yjs": "https://esm.sh/yjs@13.6.15",
+    "y-codemirror.next": "https://esm.sh/y-codemirror.next@0.3.5?deps=yjs@13.6.15,@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "y-websocket": "https://esm.sh/y-websocket@2.0.4?deps=yjs@13.6.15",
+    "lib0": "https://esm.sh/lib0@0.2.94"
+  }
+}
+</script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,300;1,8..60,400&display=swap');
+
+  :root {
+    --bg: #faf8f5;
+    --bg-sidebar: #f0ede8;
+    --fg: #2c2825;
+    --fg-dim: #8a8480;
+    --fg-faint: #b5b0ab;
+    --accent: #c05030;
+    --accent-dim: #c0503020;
+    --heading: #1a1715;
+    --keyword-todo: #c05030;
+    --keyword-done: #558855;
+    --math-bg: #f5f0eb;
+    --border: #ddd8d2;
+    --selection: #c0503025;
+    --table-border: #ccc7c0;
+    --font-mono: 'IBM Plex Mono', 'Menlo', monospace;
+    --font-serif: 'Source Serif 4', 'Georgia', serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-serif);
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.05em;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logo .mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 5px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .toolbar { display: flex; align-items: center; gap: 6px; }
+
+  .toolbar button {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+
+  .status-bar { display: flex; align-items: center; gap: 12px; }
+
+  .peer-dots { display: flex; gap: 4px; align-items: center; }
+
+  .peer-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--border);
+    transition: all 0.3s;
+  }
+
+  .conn-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .conn-status.connected { color: var(--keyword-done); background: #55885512; }
+  .conn-status.connecting { color: var(--fg-faint); background: var(--bg-sidebar); }
+  .conn-status.disconnected { color: var(--keyword-todo); background: #c0503012; }
+
+  .room-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-faint);
+    background: var(--bg-sidebar);
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: all;
+  }
+
+  .editor-wrap {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 40px 24px 80px;
+  }
+
+  .editor-container { width: 100%; max-width: 740px; }
+
+  /* ── CodeMirror ── */
+  .cm-editor {
+    font-family: var(--font-serif) !important;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: transparent !important;
+  }
+
+  .cm-editor .cm-scroller { overflow-x: hidden; }
+  .cm-editor .cm-content { padding: 0 !important; caret-color: var(--accent); }
+  .cm-editor .cm-line { padding: 0 2px; }
+  .cm-editor .cm-cursor { border-left-color: var(--accent) !important; border-left-width: 2px !important; }
+  .cm-editor .cm-selectionBackground, .cm-editor .cm-content ::selection { background: var(--selection) !important; }
+  .cm-editor .cm-activeLine { background: transparent !important; }
+  .cm-editor .cm-gutters { display: none !important; }
+  .cm-editor:focus-within { outline: none !important; }
+  .cm-editor .cm-focused { outline: none !important; }
+
+  /* ── Org headings ── */
+  .cm-org-h1 { font-size: 1.6em; font-weight: 600; color: var(--heading); line-height: 1.4; padding-top: 12px; padding-bottom: 2px; }
+  .cm-org-h2 { font-size: 1.3em; font-weight: 600; color: var(--heading); line-height: 1.4; padding-top: 8px; }
+  .cm-org-h3 { font-size: 1.1em; font-weight: 600; color: var(--fg); padding-top: 4px; }
+  .cm-org-stars { color: var(--fg-faint); font-family: var(--font-mono); font-size: 0.7em; margin-right: 4px; }
+  .cm-org-todo { font-family: var(--font-mono); font-size: 0.75em; font-weight: 600; color: var(--keyword-todo); background: #c0503012; padding: 1px 5px; border-radius: 3px; }
+  .cm-org-done { font-family: var(--font-mono); font-size: 0.75em; font-weight: 600; color: var(--keyword-done); background: #55885512; padding: 1px 5px; border-radius: 3px; }
+  .cm-org-bold { font-weight: 600; }
+  .cm-org-italic { font-style: italic; }
+  .cm-org-code { font-family: var(--font-mono); font-size: 0.88em; background: var(--bg-sidebar); padding: 1px 5px; border-radius: 3px; color: var(--accent); }
+  .cm-org-link { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-dim); text-underline-offset: 2px; }
+  .cm-org-property { font-family: var(--font-mono); font-size: 0.8em; color: var(--fg-faint); }
+  .cm-org-block-delimiter { font-family: var(--font-mono); font-size: 0.8em; color: var(--fg-faint); }
+  .cm-org-table-line { font-family: var(--font-mono); font-size: 0.88em; line-height: 1.6; }
+  .cm-org-table-pipe { color: var(--fg-faint); }
+  .cm-org-table-separator { font-family: var(--font-mono); font-size: 0.88em; color: var(--fg-faint); }
+
+  /* ── Math widgets ── */
+  .math-widget { display: inline-block; vertical-align: middle; padding: 2px 4px; border-radius: 4px; cursor: pointer; transition: background 0.15s; }
+  .math-widget:hover { background: var(--math-bg); }
+  .math-widget-block { display: block; text-align: center; padding: 12px 16px; margin: 8px 0; background: var(--math-bg); border-radius: 6px; border-left: 3px solid var(--border); cursor: pointer; transition: border-color 0.15s; }
+  .math-widget-block:hover { border-left-color: var(--accent); }
+  .math-env-label { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint); margin-bottom: 4px; text-align: left; }
+  .math-error { font-family: var(--font-mono); font-size: 12px; color: var(--keyword-todo); background: #c0503010; padding: 2px 6px; border-radius: 3px; }
+
+  /* ── Fold ── */
+  .cm-foldPlaceholder { font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint); background-color: var(--bg-sidebar); border: 1px solid var(--border); padding: 0 6px; border-radius: 3px; margin: 0 4px; }
+
+  /* ── Remote cursors ── */
+  .cm-ySelectionInfo { font-family: var(--font-mono) !important; font-size: 10px !important; padding: 1px 6px !important; border-radius: 3px 3px 3px 0 !important; opacity: 0.9; }
+
+  /* ── Cheatsheet ── */
+  .cheatsheet { position: fixed; bottom: 20px; right: 20px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 360px; display: none; z-index: 200; line-height: 1.8; }
+  .cheatsheet.visible { display: block; }
+  .cheatsheet h4 { font-size: 12px; font-weight: 600; color: var(--fg); margin-bottom: 8px; }
+  .cheatsheet kbd { display: inline-block; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-size: 10px; min-width: 20px; text-align: center; }
+  .cheatsheet .sep { border-top: 1px solid var(--border); margin: 8px 0; }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(44,40,37,0.4); display: flex; align-items: center; justify-content: center; z-index: 500; }
+  .modal-overlay.hidden { display: none; }
+  .modal { background: var(--bg); border-radius: 10px; padding: 32px; width: 420px; box-shadow: 0 8px 40px rgba(0,0,0,0.15); }
+  .modal h2 { font-family: var(--font-mono); font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .modal p { font-size: 14px; color: var(--fg-dim); margin-bottom: 16px; }
+  .modal label { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); display: block; margin-bottom: 4px; margin-top: 12px; }
+  .modal input { width: 100%; padding: 10px 14px; font-family: var(--font-mono); font-size: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); outline: none; }
+  .modal input:focus { border-color: var(--accent); }
+  .modal .modal-row { display: flex; gap: 8px; }
+  .modal .modal-row input, .modal .modal-row select { flex: 1; }
+  .modal button { width: 100%; padding: 10px; font-family: var(--font-mono); font-size: 13px; font-weight: 600; border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; margin-top: 16px; transition: opacity 0.15s; }
+  .modal button:hover { opacity: 0.85; }
+  .modal .server-note { font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint); margin-top: 12px; }
+  .modal details { margin-top: 12px; }
+  .modal summary { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="mark">∫</span>
+    OrgMath
+  </div>
+  <div class="status-bar">
+    <div class="peer-dots" id="peerDots"></div>
+    <span class="conn-status connecting" id="connStatus">connecting…</span>
+    <span class="room-label" id="roomLabel" title="Click to copy room URL"></span>
+    <div class="toolbar">
+      <button id="btnExport" title="Export as .org file">↓ .org</button>
+      <button id="btnCheatsheet" title="Show keyboard shortcuts">?</button>
+    </div>
+  </div>
+</header>
+
+<div class="editor-wrap">
+  <div class="editor-container" id="editor"></div>
+</div>
+
+<div class="cheatsheet" id="cheatsheet">
+  <h4>Org Syntax</h4>
+  * Heading 1 &nbsp; ** Heading 2 &nbsp; *** Heading 3<br>
+  TODO / DONE keywords after stars<br>
+  *bold* &nbsp; /italic/ &nbsp; ~code~ &nbsp; =verbatim=<br>
+  [[url][label]] for links
+  <div class="sep"></div>
+  <h4>Math (LaTeX)</h4>
+  $...$ inline &nbsp;&nbsp; $$...$$ display block<br>
+  \(...\) inline &nbsp;&nbsp; \[...\] display block<br>
+  \begin{align} ... \end{align}<br>
+  \begin{equation} ... \end{equation}<br>
+  Also: gather, multline, cases, pmatrix, bmatrix
+  <div class="sep"></div>
+  <h4>Tables</h4>
+  | col1 | col2 | col3 |<br>
+  |------+------+------|<br>
+  <kbd>Tab</kbd> next cell &nbsp; <kbd>Shift</kbd>+<kbd>Tab</kbd> prev cell<br>
+  Auto-aligns on <kbd>Tab</kbd>
+  <div class="sep"></div>
+  <h4>Keys</h4>
+  <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> promote / demote heading<br>
+  <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new heading at same level<br>
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> toggle TODO
+</div>
+
+<div class="modal-overlay" id="joinModal">
+  <div class="modal">
+    <h2>Join or create a room</h2>
+    <p>Share the room name with collaborators. Documents persist on the server.</p>
+
+    <label>Room name</label>
+    <input type="text" id="roomInput" placeholder="e.g. topology-seminar" autofocus>
+
+    <label>Your name</label>
+    <input type="text" id="nameInput" placeholder="e.g. Alice">
+
+    <details>
+      <summary>Server settings</summary>
+      <label>WebSocket server URL</label>
+      <input type="text" id="serverInput" placeholder="ws://localhost:4000">
+      <div class="server-note">
+        Default: ws://localhost:4000 — change this to your deployed server URL.
+        Use wss:// for HTTPS deployments.
+      </div>
+    </details>
+
+    <button id="btnJoin">Enter</button>
+  </div>
+</div>
+
+<script type="module">
+import { EditorState } from '@codemirror/state';
+import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view';
+import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+import { foldService, codeFolding, foldKeymap } from '@codemirror/language';
+import * as Y from 'yjs';
+import { yCollab } from 'y-codemirror.next';
+import { WebsocketProvider } from 'y-websocket';
+
+// ─── Config ───
+// Detect default server: same host on port 4000, or override via query param
+const params = new URLSearchParams(location.search);
+const DEFAULT_SERVER = params.get('server') ||
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    ? `ws://${location.hostname}:4000`
+    : `wss://${location.hostname.replace(/^www\./, '')}:4000`);
+
+// ─── Utility ───
+const PEER_COLORS = ['#c05030','#3070c0','#30a060','#a050b0','#c08020','#2090a0','#d04080','#607020'];
+function randomColor() { return PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)]; }
+
+// ─── DOM refs ───
+const joinModal = document.getElementById('joinModal');
+const roomInput = document.getElementById('roomInput');
+const nameInput = document.getElementById('nameInput');
+const serverInput = document.getElementById('serverInput');
+const btnJoin = document.getElementById('btnJoin');
+const roomLabel = document.getElementById('roomLabel');
+const peerDots = document.getElementById('peerDots');
+const connStatus = document.getElementById('connStatus');
+const cheatsheet = document.getElementById('cheatsheet');
+const btnCheatsheet = document.getElementById('btnCheatsheet');
+const btnExport = document.getElementById('btnExport');
+
+// Pre-fill from URL
+const hashRoom = location.hash.slice(1);
+if (hashRoom) roomInput.value = decodeURIComponent(hashRoom);
+serverInput.value = DEFAULT_SERVER;
+
+btnCheatsheet.addEventListener('click', () => cheatsheet.classList.toggle('visible'));
+document.addEventListener('click', e => {
+  if (!cheatsheet.contains(e.target) && e.target !== btnCheatsheet) cheatsheet.classList.remove('visible');
+});
+
+btnJoin.addEventListener('click', startEditor);
+roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.focus(); });
+nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startEditor(); });
+
+let editorView = null;
+
+function startEditor() {
+  const room = roomInput.value.trim() || 'default-room';
+  const name = nameInput.value.trim() || 'Anon';
+  const server = serverInput.value.trim() || DEFAULT_SERVER;
+  joinModal.classList.add('hidden');
+  location.hash = encodeURIComponent(room);
+  roomLabel.textContent = room;
+  roomLabel.addEventListener('click', () => navigator.clipboard?.writeText(location.href));
+  initEditor(room, name, server);
+}
+
+// ─── Export handler ───
+btnExport.addEventListener('click', () => {
+  if (!editorView) return;
+  const content = editorView.state.doc.toString();
+  const blob = new Blob([content], { type: 'text/org' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${roomInput.value.trim() || 'document'}.org`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+//  KaTeX Math Widget
+// ═══════════════════════════════════════════════════════════════
+
+class MathWidget extends WidgetType {
+  constructor(src, displayMode, envName) {
+    super();
+    this.src = src;
+    this.displayMode = displayMode;
+    this.envName = envName || null;
+  }
+  eq(other) { return other.src === this.src && other.displayMode === this.displayMode && other.envName === this.envName; }
+  toDOM() {
+    const wrap = document.createElement('span');
+    wrap.className = this.displayMode ? 'math-widget-block' : 'math-widget';
+    try {
+      let texSrc = this.src;
+      if (this.envName) texSrc = `\\begin{${this.envName}}${this.src}\\end{${this.envName}}`;
+      katex.render(texSrc, wrap, { displayMode: this.displayMode, throwOnError: false, trust: true, strict: false });
+      if (this.envName) {
+        const label = document.createElement('span');
+        label.className = 'math-env-label';
+        label.textContent = this.envName;
+        wrap.insertBefore(label, wrap.firstChild);
+      }
+    } catch (e) {
+      wrap.innerHTML = `<span class="math-error">${e.message}</span>`;
+    }
+    return wrap;
+  }
+  ignoreEvent() { return false; }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Math decorations
+// ═══════════════════════════════════════════════════════════════
+
+const MATH_ENVS = [
+  'equation','equation\\*','align','align\\*','gather','gather\\*',
+  'multline','multline\\*','cases','pmatrix','bmatrix','vmatrix',
+  'Bmatrix','Vmatrix','split','aligned','gathered','array',
+];
+
+function cursorInside(sel, from, to) {
+  return (sel.from >= from && sel.from <= to) || (sel.to >= from && sel.to <= to);
+}
+
+function mathDecorations(view) {
+  const widgets = [];
+  const doc = view.state.doc.toString();
+  const sel = view.state.selection.main;
+  const mathRanges = [];
+
+  function addIfNoOverlap(from, to, widget) {
+    for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
+    if (cursorInside(sel, from, to)) return;
+    mathRanges.push({ from, to });
+    widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
+  }
+
+  for (const env of MATH_ENVS) {
+    const envEsc = env.replace(/\\/g, '\\\\').replace(/\*/g, '\\*');
+    const re = new RegExp(`\\\\begin\\{${envEsc}\\}([\\s\\S]*?)\\\\end\\{${envEsc}\\}`, 'g');
+    let m;
+    while ((m = re.exec(doc)) !== null) {
+      addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1], true, env.replace(/\\\*/g, '*')));
+    }
+  }
+
+  let m;
+  const blockRe = /\$\$([\s\S]+?)\$\$/g;
+  while ((m = blockRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true));
+
+  const bracketRe = /\\\[([\s\S]+?)\\\]/g;
+  while ((m = bracketRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true));
+
+  const inlineRe = /(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)/g;
+  while ((m = inlineRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1], false));
+
+  const parenRe = /\\\(([\s\S]+?)\\\)/g;
+  while ((m = parenRe.exec(doc)) !== null) addIfNoOverlap(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), false));
+
+  return Decoration.set(widgets, true);
+}
+
+const mathPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = mathDecorations(view); }
+  update(update) { if (update.docChanged || update.selectionSet) this.decorations = mathDecorations(update.view); }
+}, { decorations: v => v.decorations });
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Org decorations
+// ═══════════════════════════════════════════════════════════════
+
+function orgDecorations(view) {
+  const decos = [];
+  const doc = view.state.doc;
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    const text = line.text;
+
+    const hm = text.match(/^(\*{1,6})\s+(.*)$/);
+    if (hm) {
+      const level = hm[1].length;
+      const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
+      decos.push(Decoration.line({ class: cls }).range(line.from));
+      decos.push(Decoration.mark({ class: 'cm-org-stars' }).range(line.from, line.from + hm[1].length));
+      const after = text.slice(hm[1].length + 1);
+      const tm = after.match(/^(TODO|FIXME|HACK|NEXT)\s/);
+      const dm = after.match(/^(DONE|CANCELLED)\s/);
+      if (tm) decos.push(Decoration.mark({ class: 'cm-org-todo' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + tm[1].length));
+      else if (dm) decos.push(Decoration.mark({ class: 'cm-org-done' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + dm[1].length));
+      continue;
+    }
+
+    if (text.match(/^\s*\|/)) {
+      if (text.match(/^\s*\|[-+|]+\|\s*$/)) {
+        decos.push(Decoration.line({ class: 'cm-org-table-separator' }).range(line.from));
+      } else {
+        decos.push(Decoration.line({ class: 'cm-org-table-line' }).range(line.from));
+        const pr = /\|/g; let pm;
+        while ((pm = pr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-table-pipe' }).range(line.from + pm.index, line.from + pm.index + 1));
+      }
+      continue;
+    }
+
+    if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) { decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from)); continue; }
+    if (text.match(/^\s*#\+/i)) { decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from)); continue; }
+
+    if (!text.match(/^\*+\s/)) {
+      const br = /(?<!\w)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\w)/g; let bm;
+      while ((bm = br.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(line.from + bm.index, line.from + bm.index + bm[0].length));
+    }
+    const ir = /(?<!\w)\/([^\s/](?:[^/]*[^\s/])?)\/(?!\w)/g; let im;
+    while ((im = ir.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(line.from + im.index, line.from + im.index + im[0].length));
+    const cr = /(?<!\w)[~=]([^\s~=](?:[^~=]*[^\s~=])?)[~=](?!\w)/g; let cm;
+    while ((cm = cr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-code' }).range(line.from + cm.index, line.from + cm.index + cm[0].length));
+    const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
+    while ((lm = lr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + lm.index, line.from + lm.index + lm[0].length));
+  }
+  return Decoration.set(decos, true);
+}
+
+const orgPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = orgDecorations(view); }
+  update(update) { if (update.docChanged || update.viewportChanged) this.decorations = orgDecorations(update.view); }
+}, { decorations: v => v.decorations });
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Org folding
+// ═══════════════════════════════════════════════════════════════
+
+const orgFoldService = foldService.of((state, lineStart) => {
+  const line = state.doc.lineAt(lineStart);
+  const m = line.text.match(/^(\*{1,6})\s/);
+  if (!m) return null;
+  const level = m[1].length;
+  let endLine = line.number;
+  for (let i = line.number + 1; i <= state.doc.lines; i++) {
+    const nl = state.doc.line(i);
+    const nm = nl.text.match(/^(\*{1,6})\s/);
+    if (nm && nm[1].length <= level) break;
+    endLine = i;
+  }
+  if (endLine === line.number) return null;
+  return { from: line.to, to: state.doc.line(endLine).to };
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Org tables
+// ═══════════════════════════════════════════════════════════════
+
+function isTableLine(t) { return /^\s*\|/.test(t); }
+function isSepLine(t) { return /^\s*\|[-+|]+\|\s*$/.test(t); }
+function parseRow(t) {
+  const tr = t.trim();
+  if (!tr.startsWith('|') || !tr.endsWith('|')) return null;
+  return tr.slice(1, -1).split('|').map(c => c.trim());
+}
+function getTableRange(doc, n) {
+  let s = n, e = n;
+  while (s > 1 && isTableLine(doc.line(s - 1).text)) s--;
+  while (e < doc.lines && isTableLine(doc.line(e + 1).text)) e++;
+  return { start: s, end: e };
+}
+function colWidths(doc, s, e) {
+  const w = [];
+  for (let i = s; i <= e; i++) {
+    if (isSepLine(doc.line(i).text)) continue;
+    const cells = parseRow(doc.line(i).text);
+    if (!cells) continue;
+    cells.forEach((c, j) => { w[j] = Math.max(w[j] || 1, c.length); });
+  }
+  return w;
+}
+function fmtRow(cells, w) { return '|' + cells.map((c, i) => ' ' + c.padEnd(w[i] || 1) + ' ').join('|') + '|'; }
+function fmtSep(w) { return '|' + w.map(v => '-'.repeat(v + 2)).join('+') + '|'; }
+
+function realignTable(view) {
+  const state = view.state, pos = state.selection.main.head;
+  const cur = state.doc.lineAt(pos);
+  if (!isTableLine(cur.text)) return null;
+  const { start, end } = getTableRange(state.doc, cur.number);
+  const w = colWidths(state.doc, start, end);
+  if (!w.length) return null;
+  const cells = parseRow(cur.text);
+  const col = pos - cur.from;
+  let cellIdx = -1, cc = 1;
+  if (cells) {
+    const raw = cur.text.trim().slice(1, -1).split('|');
+    for (let c = 0; c < raw.length; c++) {
+      if (col < cc + raw[c].length + 1) { cellIdx = c; break; }
+      cc += raw[c].length + 1;
+    }
+    if (cellIdx === -1) cellIdx = cells.length - 1;
+  }
+  const lines = [];
+  for (let i = start; i <= end; i++) {
+    const lt = state.doc.line(i).text;
+    if (isSepLine(lt)) lines.push(fmtSep(w));
+    else { const c = parseRow(lt); if (c) { while (c.length < w.length) c.push(''); lines.push(fmtRow(c.slice(0, w.length), w)); } else lines.push(lt); }
+  }
+  return { from: state.doc.line(start).from, to: state.doc.line(end).to, newText: lines.join('\n'), curLineIdx: cur.number - start, cellIdx, widths: w };
+}
+
+function cellPos(doc, tableStart, lineIdx, cellIdx, w) {
+  const line = doc.line(tableStart + lineIdx);
+  let off = 1;
+  for (let c = 0; c < cellIdx; c++) off += (w[c] || 1) + 3;
+  return line.from + off + 1;
+}
+
+function tableTab(view) {
+  const cur = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(cur.text) || isSepLine(cur.text)) return false;
+  const r = realignTable(view); if (!r) return false;
+  let { from, to, newText, curLineIdx, cellIdx, widths } = r;
+  const tsl = view.state.doc.lineAt(from).number;
+  let nli = curLineIdx, nci = cellIdx + 1;
+  if (nci >= widths.length) {
+    nci = 0; nli++;
+    const nl = newText.split('\n');
+    while (nli < nl.length && isSepLine(nl[nli])) nli++;
+    if (nli >= nl.length) {
+      const nr = fmtRow(widths.map(() => ''), widths);
+      view.dispatch({ changes: { from, to, insert: newText + '\n' + nr } });
+      const ns = view.state, ntsl = ns.doc.lineAt(from).number;
+      view.dispatch({ selection: { anchor: ns.doc.line(ntsl + nli).from + 2 } });
+      return true;
+    }
+  }
+  view.dispatch({ changes: { from, to, insert: newText } });
+  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, nli, nci, widths) } });
+  return true;
+}
+
+function tableShiftTab(view) {
+  const cur = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(cur.text) || isSepLine(cur.text)) return false;
+  const r = realignTable(view); if (!r) return false;
+  let { from, to, newText, curLineIdx, cellIdx, widths } = r;
+  let pli = curLineIdx, pci = cellIdx - 1;
+  if (pci < 0) {
+    pci = widths.length - 1; pli--;
+    const nl = newText.split('\n');
+    while (pli >= 0 && isSepLine(nl[pli])) pli--;
+    if (pli < 0) { pli = 0; pci = 0; }
+  }
+  view.dispatch({ changes: { from, to, insert: newText } });
+  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, pli, pci, widths) } });
+  return true;
+}
+
+function tableEnter(view) {
+  const cur = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(cur.text)) return false;
+  const r = realignTable(view); if (!r) return false;
+  const { from, to, newText, curLineIdx, widths } = r;
+  const lines = newText.split('\n');
+  lines.splice(curLineIdx + 1, 0, fmtRow(widths.map(() => ''), widths));
+  view.dispatch({ changes: { from, to, insert: lines.join('\n') } });
+  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, curLineIdx + 1, 0, widths) } });
+  return true;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Org keybindings
+// ═══════════════════════════════════════════════════════════════
+
+function headingLevel(t) { const m = t.match(/^(\*{1,6})\s/); return m ? m[1].length : 0; }
+
+const orgKeymap = keymap.of([
+  { key: 'Tab', run: tableTab },
+  { key: 'Shift-Tab', run: tableShiftTab },
+  { key: 'Enter', run: tableEnter },
+  {
+    key: 'Alt-ArrowLeft', run(view) {
+      const l = view.state.doc.lineAt(view.state.selection.main.head), lv = headingLevel(l.text);
+      if (lv <= 1) return false;
+      view.dispatch({ changes: { from: l.from, to: l.from + lv, insert: '*'.repeat(lv - 1) } }); return true;
+    }
+  },
+  {
+    key: 'Alt-ArrowRight', run(view) {
+      const l = view.state.doc.lineAt(view.state.selection.main.head), lv = headingLevel(l.text);
+      if (!lv) return false;
+      view.dispatch({ changes: { from: l.from, to: l.from + lv, insert: '*'.repeat(lv + 1) } }); return true;
+    }
+  },
+  {
+    key: 'Ctrl-Enter', run(view) {
+      const l = view.state.doc.lineAt(view.state.selection.main.head), lv = headingLevel(l.text);
+      const s = lv > 0 ? '*'.repeat(lv) + ' ' : '* ';
+      view.dispatch({ changes: { from: l.to, insert: '\n' + s }, selection: { anchor: l.to + 1 + s.length } }); return true;
+    }
+  },
+  {
+    key: 'Ctrl-Shift-Enter', run(view) {
+      const l = view.state.doc.lineAt(view.state.selection.main.head);
+      const m = l.text.match(/^(\*{1,6})\s+(TODO |DONE )?(.*)$/);
+      if (!m) return false;
+      const cur = (m[2] || '').trim();
+      const next = !cur ? 'TODO ' : cur === 'TODO' ? 'DONE ' : '';
+      view.dispatch({ changes: { from: l.from, to: l.to, insert: m[1] + ' ' + next + m[3] } }); return true;
+    }
+  }
+]);
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Default document
+// ═══════════════════════════════════════════════════════════════
+
+const DEFAULT_DOC = `* Collaborative Math Editing
+
+Welcome! This is an *Org-mode style* editor with /inline LaTeX math/ and ~real-time collaboration~.
+
+** Getting Started
+
+Inline math: $E = mc^2$ renders between dollar signs.
+
+Display math with double dollars:
+
+$$\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}$$
+
+** LaTeX Environments
+
+Multi-line aligned equations with =\\begin{align}=:
+
+\\begin{align}
+\\nabla \\times \\mathbf{E} &= -\\frac{\\partial \\mathbf{B}}{\\partial t} \\\\
+\\nabla \\times \\mathbf{B} &= \\mu_0 \\mathbf{J} + \\mu_0 \\epsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}
+\\end{align}
+
+The Schrödinger equation:
+
+\\begin{equation}
+i\\hbar \\frac{\\partial}{\\partial t} \\Psi(\\mathbf{r},t) = \\hat{H} \\Psi(\\mathbf{r},t)
+\\end{equation}
+
+** TODO Topology Notes
+
+The Gauss-Bonnet theorem:
+
+\\begin{equation}
+\\int_M K \\, dA + \\int_{\\partial M} k_g \\, ds = 2\\pi \\chi(M)
+\\end{equation}
+
+| Theorem          | Year | Field    |
+|------------------+------+----------|
+| Noether's        | 1915 | Algebra  |
+| Gauss-Bonnet     | 1848 | Geometry |
+| Stokes'          | 1854 | Analysis |
+
+** Scratch Space
+
+Try typing some math here!
+`;
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Init editor with y-websocket
+// ═══════════════════════════════════════════════════════════════
+
+function initEditor(room, username, serverUrl) {
+  const ydoc = new Y.Doc();
+  const ytext = ydoc.getText('codemirror');
+  const color = randomColor();
+
+  // Connect to y-websocket server
+  const provider = new WebsocketProvider(serverUrl, room, ydoc);
+
+  const awareness = provider.awareness;
+  awareness.setLocalStateField('user', {
+    name: username,
+    color: color,
+    colorLight: color + '30'
+  });
+
+  // Connection status indicator
+  function updateStatus(status) {
+    connStatus.className = 'conn-status ' + status;
+    connStatus.textContent = status === 'connected' ? '● connected'
+      : status === 'connecting' ? '○ connecting…'
+      : '○ disconnected';
+  }
+
+  provider.on('status', ({ status }) => updateStatus(status));
+  updateStatus('connecting');
+
+  // Seed default doc if empty (only first peer)
+  provider.on('sync', (synced) => {
+    if (synced && ytext.toString() === '') {
+      ytext.insert(0, DEFAULT_DOC);
+    }
+  });
+
+  // Peer dots
+  function updatePeers() {
+    const states = Array.from(awareness.getStates().values());
+    peerDots.innerHTML = '';
+    states.forEach(s => {
+      if (!s.user) return;
+      const dot = document.createElement('div');
+      dot.className = 'peer-dot';
+      dot.style.background = s.user.color;
+      dot.title = s.user.name;
+      peerDots.appendChild(dot);
+    });
+  }
+  awareness.on('change', updatePeers);
+  updatePeers();
+
+  const undoManager = new Y.UndoManager(ytext);
+
+  const theme = EditorView.theme({
+    '&': { backgroundColor: 'transparent' },
+    '.cm-scroller': { fontFamily: 'var(--font-serif)', lineHeight: '1.7' },
+    '.cm-foldPlaceholder': { fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--fg-faint)', backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border)', padding: '0 6px', borderRadius: '3px', margin: '0 4px' }
+  });
+
+  const state = EditorState.create({
+    doc: ytext.toString(),
+    extensions: [
+      theme, orgPlugin, mathPlugin, orgFoldService, codeFolding(), orgKeymap,
+      keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+      yCollab(ytext, awareness, { undoManager }),
+      EditorView.lineWrapping,
+    ]
+  });
+
+  editorView = new EditorView({
+    state,
+    parent: document.getElementById('editor')
+  });
+
+  editorView.focus();
+}
+</script>
+</body>
+</html>
