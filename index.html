@@ -534,22 +534,11 @@ function orgDecorations(view) {
       // Don't continue - allow inline formatting to be processed
     }
 
-    // Markdown headings: # Heading, ## Heading, etc.
-    const mdh = text.match(/^(#{1,6})\s+(.*)$/);
-    if (mdh) {
-      const level = mdh[1].length;
-      const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
-      decos.push(Decoration.line({ class: cls }).range(line.from));
-      // Hide the # markers and space
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + mdh[1].length + 1));
-      // Don't continue - allow inline formatting (bold, italic, etc.) to be processed
-    }
-
-    // Bullet points: - item or * item (not at start for org headings)
-    const bullet = text.match(/^(\s*)([-*+])\s+/);
-    if (bullet && !(bullet[2] === '*' && bullet[1] === '')) {
+    // Bullet points: - item only (org-mode style)
+    const bullet = text.match(/^(\s*)-\s+/);
+    if (bullet) {
       decos.push(Decoration.line({ class: 'cm-bullet-line' }).range(line.from));
-      // Hide the dash/marker, show bullet via CSS
+      // Hide the dash, show bullet via CSS
       const markerStart = line.from + bullet[1].length;
       decos.push(Decoration.mark({ class: 'cm-bullet' }).range(markerStart, markerStart + 1));
     }
@@ -567,33 +556,6 @@ function orgDecorations(view) {
 
     if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) { decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from)); continue; }
     if (text.match(/^\s*#\+/i)) { decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from)); continue; }
-
-    // Markdown bold: **text**
-    const mdbr = /\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/g; let mdbm;
-    while ((mdbm = mdbr.exec(text)) !== null) {
-      const start = line.from + mdbm.index;
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 2)); // hide **
-      decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(start + 2, start + mdbm[0].length - 2)); // style content
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdbm[0].length - 2, start + mdbm[0].length)); // hide **
-    }
-
-    // Markdown italic: _text_
-    const mdir = /(?<!\w)_([^\s_](?:[^_]*[^\s_])?)_(?!\w)/g; let mdim;
-    while ((mdim = mdir.exec(text)) !== null) {
-      const start = line.from + mdim.index;
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide _
-      decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(start + 1, start + mdim[0].length - 1)); // style content
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdim[0].length - 1, start + mdim[0].length)); // hide _
-    }
-
-    // Markdown code: `text`
-    const mdcr = /`([^`]+)`/g; let mdcm;
-    while ((mdcm = mdcr.exec(text)) !== null) {
-      const start = line.from + mdcm.index;
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide `
-      decos.push(Decoration.mark({ class: 'cm-org-code' }).range(start + 1, start + mdcm[0].length - 1)); // style content
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdcm[0].length - 1, start + mdcm[0].length)); // hide `
-    }
 
     // Org-mode bold: *text* (but not on heading lines)
     if (!text.match(/^\*+\s/)) {
@@ -624,9 +586,6 @@ function orgDecorations(view) {
     // Org-mode links: [[url][label]]
     const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
     while ((lm = lr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + lm.index, line.from + lm.index + lm[0].length));
-    // Markdown links: [label](url)
-    const mdlr = /\[([^\]]+)\]\(([^)]+)\)/g; let mdlm;
-    while ((mdlm = mdlr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + mdlm.index, line.from + mdlm.index + mdlm[0].length));
   }
   return Decoration.set(decos, true);
 }
@@ -807,9 +766,9 @@ const orgKeymap = keymap.of([
   { key: 'Shift-Tab', run: tableShiftTab },
   { key: 'Enter', run: tableEnter },
   // Text formatting
-  { key: 'Mod-b', run: (view) => wrapSelection(view, '**', '**') },
-  { key: 'Mod-i', run: (view) => wrapSelection(view, '_', '_') },
-  { key: 'Mod-e', run: (view) => wrapSelection(view, '`', '`') },
+  { key: 'Mod-b', run: (view) => wrapSelection(view, '*', '*') },
+  { key: 'Mod-i', run: (view) => wrapSelection(view, '/', '/') },
+  { key: 'Mod-e', run: (view) => wrapSelection(view, '~', '~') },
   {
     key: 'Alt-ArrowLeft', run(view) {
       const l = view.state.doc.lineAt(view.state.selection.main.head), lv = headingLevel(l.text);
