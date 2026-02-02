@@ -769,10 +769,34 @@ function tableEnter(view) {
 
 function headingLevel(t) { const m = t.match(/^(\*{1,6})\s/); return m ? m[1].length : 0; }
 
+// Helper to wrap selection or insert markers with cursor in middle
+function wrapSelection(view, before, after) {
+  const sel = view.state.selection.main;
+  if (sel.empty) {
+    // No selection: insert markers and place cursor between them
+    view.dispatch({
+      changes: { from: sel.from, insert: before + after },
+      selection: { anchor: sel.from + before.length }
+    });
+  } else {
+    // Has selection: wrap it
+    const text = view.state.sliceDoc(sel.from, sel.to);
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: before + text + after },
+      selection: { anchor: sel.from + before.length, head: sel.from + before.length + text.length }
+    });
+  }
+  return true;
+}
+
 const orgKeymap = keymap.of([
   { key: 'Tab', run: tableTab },
   { key: 'Shift-Tab', run: tableShiftTab },
   { key: 'Enter', run: tableEnter },
+  // Text formatting
+  { key: 'Mod-b', run: (view) => wrapSelection(view, '**', '**') },
+  { key: 'Mod-i', run: (view) => wrapSelection(view, '_', '_') },
+  { key: 'Mod-e', run: (view) => wrapSelection(view, '`', '`') },
   {
     key: 'Alt-ArrowLeft', run(view) {
       const l = view.state.doc.lineAt(view.state.selection.main.head), lv = headingLevel(l.text);
