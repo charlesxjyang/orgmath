@@ -5,13 +5,10 @@
   <!-- Centered content group -->
   <g transform="translate(600, 315)">
     <!-- Logo mark (integral symbol in rounded square) -->
-    <rect x="-120" y="-60" width="100" height="100" rx="16" fill="#c05030"/>
-    <text x="-70" y="12" font-family="Georgia, serif" font-size="64" font-weight="600" fill="white" text-anchor="middle">∫</text>
+    <rect x="-200" y="-75" width="150" height="150" rx="24" fill="#c05030"/>
+    <text x="-125" y="30" font-family="Georgia, serif" font-size="100" font-weight="600" fill="white" text-anchor="middle">∫</text>
 
     <!-- OrgMath text -->
-    <text x="40" y="14" font-family="'IBM Plex Mono', Menlo, monospace" font-size="56" font-weight="600" fill="#2c2825" text-anchor="start">OrgMath</text>
+    <text x="20" y="25" font-family="'IBM Plex Mono', Menlo, monospace" font-size="80" font-weight="600" fill="#2c2825" text-anchor="start">OrgMath</text>
   </g>
-
-  <!-- Tagline -->
-  <text x="600" y="420" font-family="'Source Serif 4', Georgia, serif" font-size="28" fill="#8a8480" text-anchor="middle">Collaborative Math Editor with Org-mode &amp; LaTeX</text>
 </svg>
