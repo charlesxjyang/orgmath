@@ -266,10 +266,12 @@
 
 <div class="cheatsheet" id="cheatsheet">
   <h4>Org Syntax</h4>
+  #+TITLE: Document title<br>
   * Heading 1 &nbsp; ** Heading 2 &nbsp; *** Heading 3<br>
   TODO / DONE keywords after stars<br>
   *bold* &nbsp; /italic/ &nbsp; ~code~ &nbsp; =verbatim=<br>
-  [[url][label]] for links
+  - bullet point (auto-continues on Enter)<br>
+  [[https://url][label]] for links
   <div class="sep"></div>
   <h4>Math (LaTeX)</h4>
   $...$ inline &nbsp;&nbsp; $$...$$ display block<br>
@@ -281,13 +283,15 @@
   <h4>Tables</h4>
   | col1 | col2 | col3 |<br>
   |------+------+------|<br>
-  <kbd>Tab</kbd> next cell &nbsp; <kbd>Shift</kbd>+<kbd>Tab</kbd> prev cell<br>
-  Auto-aligns on <kbd>Tab</kbd>
+  <kbd>Tab</kbd> next cell &nbsp; <kbd>Shift</kbd>+<kbd>Tab</kbd> prev cell
   <div class="sep"></div>
-  <h4>Keys</h4>
+  <h4>Keyboard Shortcuts</h4>
+  <kbd>Ctrl</kbd>+<kbd>B</kbd> bold &nbsp; <kbd>Ctrl</kbd>+<kbd>I</kbd> italic &nbsp; <kbd>Ctrl</kbd>+<kbd>E</kbd> code<br>
+  <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &nbsp; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redo<br>
   <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> promote / demote heading<br>
   <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new heading at same level<br>
-  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> toggle TODO
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> toggle TODO<br>
+  <kbd>Enter</kbd> on bullet continues list
 </div>
 
 <div class="modal-overlay" id="joinModal">
