@@ -183,6 +183,7 @@
   .cm-org-h2 { font-size: 1.3em; font-weight: 600; color: var(--heading); line-height: 1.4; padding-top: 8px; }
   .cm-org-h3 { font-size: 1.1em; font-weight: 600; color: var(--fg); padding-top: 4px; }
   .cm-org-stars { color: var(--fg-faint); font-family: var(--font-mono); font-size: 0.7em; margin-right: 4px; }
+  .cm-hide { font-size: 0; color: transparent; }
   .cm-org-todo { font-family: var(--font-mono); font-size: 0.75em; font-weight: 600; color: var(--keyword-todo); background: #c0503012; padding: 1px 5px; border-radius: 3px; }
   .cm-org-done { font-family: var(--font-mono); font-size: 0.75em; font-weight: 600; color: var(--keyword-done); background: #55885512; padding: 1px 5px; border-radius: 3px; }
   .cm-org-bold { font-weight: 600; }
@@ -512,7 +513,8 @@ function orgDecorations(view) {
       const level = mdh[1].length;
       const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
       decos.push(Decoration.line({ class: cls }).range(line.from));
-      decos.push(Decoration.mark({ class: 'cm-org-stars' }).range(line.from, line.from + mdh[1].length));
+      // Hide the # markers and space
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + mdh[1].length + 1));
       continue;
     }
 
@@ -532,27 +534,57 @@ function orgDecorations(view) {
 
     // Markdown bold: **text**
     const mdbr = /\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/g; let mdbm;
-    while ((mdbm = mdbr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(line.from + mdbm.index, line.from + mdbm.index + mdbm[0].length));
+    while ((mdbm = mdbr.exec(text)) !== null) {
+      const start = line.from + mdbm.index;
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 2)); // hide **
+      decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(start + 2, start + mdbm[0].length - 2)); // style content
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdbm[0].length - 2, start + mdbm[0].length)); // hide **
+    }
 
     // Markdown italic: _text_
     const mdir = /(?<!\w)_([^\s_](?:[^_]*[^\s_])?)_(?!\w)/g; let mdim;
-    while ((mdim = mdir.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(line.from + mdim.index, line.from + mdim.index + mdim[0].length));
+    while ((mdim = mdir.exec(text)) !== null) {
+      const start = line.from + mdim.index;
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide _
+      decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(start + 1, start + mdim[0].length - 1)); // style content
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdim[0].length - 1, start + mdim[0].length)); // hide _
+    }
 
     // Markdown code: `text`
     const mdcr = /`([^`]+)`/g; let mdcm;
-    while ((mdcm = mdcr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-code' }).range(line.from + mdcm.index, line.from + mdcm.index + mdcm[0].length));
+    while ((mdcm = mdcr.exec(text)) !== null) {
+      const start = line.from + mdcm.index;
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide `
+      decos.push(Decoration.mark({ class: 'cm-org-code' }).range(start + 1, start + mdcm[0].length - 1)); // style content
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + mdcm[0].length - 1, start + mdcm[0].length)); // hide `
+    }
 
     // Org-mode bold: *text* (but not on heading lines)
     if (!text.match(/^\*+\s/)) {
       const br = /(?<!\w)(?<!\*)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\*)(?!\w)/g; let bm;
-      while ((bm = br.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(line.from + bm.index, line.from + bm.index + bm[0].length));
+      while ((bm = br.exec(text)) !== null) {
+        const start = line.from + bm.index;
+        decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide *
+        decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(start + 1, start + bm[0].length - 1)); // style content
+        decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + bm[0].length - 1, start + bm[0].length)); // hide *
+      }
     }
     // Org-mode italic: /text/
     const ir = /(?<!\w)\/([^\s/](?:[^/]*[^\s/])?)\/(?!\w)/g; let im;
-    while ((im = ir.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(line.from + im.index, line.from + im.index + im[0].length));
+    while ((im = ir.exec(text)) !== null) {
+      const start = line.from + im.index;
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide /
+      decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(start + 1, start + im[0].length - 1)); // style content
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + im[0].length - 1, start + im[0].length)); // hide /
+    }
     // Org-mode code: ~text~ or =text=
     const cr = /(?<!\w)[~=]([^\s~=](?:[^~=]*[^\s~=])?)[~=](?!\w)/g; let cm;
-    while ((cm = cr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-code' }).range(line.from + cm.index, line.from + cm.index + cm[0].length));
+    while ((cm = cr.exec(text)) !== null) {
+      const start = line.from + cm.index;
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide ~ or =
+      decos.push(Decoration.mark({ class: 'cm-org-code' }).range(start + 1, start + cm[0].length - 1)); // style content
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + cm[0].length - 1, start + cm[0].length)); // hide ~ or =
+    }
     // Org-mode links: [[url][label]]
     const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
     while ((lm = lr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + lm.index, line.from + lm.index + lm[0].length));
