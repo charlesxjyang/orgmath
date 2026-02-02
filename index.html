@@ -178,6 +178,9 @@
   .cm-editor:focus-within { outline: none !important; }
   .cm-editor .cm-focused { outline: none !important; }
 
+  /* ── Org title ── */
+  .cm-org-title { font-size: 2em; font-weight: 600; color: var(--heading); line-height: 1.3; padding-top: 8px; padding-bottom: 16px; text-align: center; }
+
   /* ── Org headings ── */
   .cm-org-h1 { font-size: 1.6em; font-weight: 600; color: var(--heading); line-height: 1.4; padding-top: 12px; padding-bottom: 2px; }
   .cm-org-h2 { font-size: 1.3em; font-weight: 600; color: var(--heading); line-height: 1.4; padding-top: 8px; }
@@ -583,6 +586,17 @@ function orgDecorations(view) {
     }
 
     if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) { decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from)); continue; }
+
+    // #+TITLE: displayed as document title
+    const titleMatch = text.match(/^#\+TITLE:\s*(.*)$/i);
+    if (titleMatch) {
+      decos.push(Decoration.line({ class: 'cm-org-title' }).range(line.from));
+      // Hide #+TITLE: prefix
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + 8));
+      continue;
+    }
+
+    // Other #+KEYWORD: lines
     if (text.match(/^\s*#\+/i)) { decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from)); continue; }
 
     // Org-mode bold: *text* (but not on heading lines)
