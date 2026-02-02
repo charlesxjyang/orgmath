@@ -195,6 +195,9 @@
   .cm-org-table-line { font-family: var(--font-mono); font-size: 0.88em; line-height: 1.6; }
   .cm-org-table-pipe { color: var(--fg-faint); }
   .cm-org-table-separator { font-family: var(--font-mono); font-size: 0.88em; color: var(--fg-faint); }
+  .cm-bullet-line { padding-left: 0.5em; }
+  .cm-bullet { font-size: 0; }
+  .cm-bullet::after { content: '•'; font-size: 16px; color: var(--fg-dim); margin-right: 0.5em; }
 
   /* ── Math widgets ── */
   .math-widget { display: inline-block; vertical-align: middle; padding: 2px 4px; border-radius: 4px; cursor: pointer; transition: background 0.15s; }
@@ -521,7 +524,8 @@ function orgDecorations(view) {
       const level = hm[1].length;
       const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
       decos.push(Decoration.line({ class: cls }).range(line.from));
-      decos.push(Decoration.mark({ class: 'cm-org-stars' }).range(line.from, line.from + hm[1].length));
+      // Hide the * markers and space
+      decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + hm[1].length + 1));
       const after = text.slice(hm[1].length + 1);
       const tm = after.match(/^(TODO|FIXME|HACK|NEXT)\s/);
       const dm = after.match(/^(DONE|CANCELLED)\s/);
@@ -539,6 +543,15 @@ function orgDecorations(view) {
       // Hide the # markers and space
       decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + mdh[1].length + 1));
       // Don't continue - allow inline formatting (bold, italic, etc.) to be processed
+    }
+
+    // Bullet points: - item or * item (not at start for org headings)
+    const bullet = text.match(/^(\s*)([-*+])\s+/);
+    if (bullet && !(bullet[2] === '*' && bullet[1] === '')) {
+      decos.push(Decoration.line({ class: 'cm-bullet-line' }).range(line.from));
+      // Hide the dash/marker, show bullet via CSS
+      const markerStart = line.from + bullet[1].length;
+      decos.push(Decoration.mark({ class: 'cm-bullet' }).range(markerStart, markerStart + 1));
     }
 
     if (text.match(/^\s*\|/)) {
