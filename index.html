@@ -200,6 +200,7 @@
   .math-widget { display: inline-block; vertical-align: middle; padding: 2px 4px; border-radius: 4px; cursor: pointer; transition: background 0.15s; }
   .math-widget:hover { background: var(--math-bg); }
   .math-widget-block { display: block; text-align: center; padding: 12px 16px; margin: 8px 0; background: var(--math-bg); border-radius: 6px; border-left: 3px solid var(--border); cursor: pointer; transition: border-color 0.15s; }
+  .cm-math-hidden { display: none !important; }
   .math-widget-block:hover { border-left-color: var(--accent); }
   .math-env-label { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint); margin-bottom: 4px; text-align: left; }
   .math-error { font-family: var(--font-mono); font-size: 12px; color: var(--keyword-todo); background: #c0503010; padding: 2px 6px; border-radius: 3px; }
@@ -432,18 +433,40 @@ function cursorInside(sel, from, to) {
 }
 
 function computeMathDecorations(state) {
-  const widgets = [];
+  const decos = [];
   const doc = state.doc.toString();
   const sel = state.selection.main;
   const mathRanges = [];
 
   function addMath(from, to, widget, content) {
     for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
-    if (cursorInside(sel, from, to)) return;
-    // Skip multi-line - Yjs collaboration doesn't support cross-line replace decorations
-    if (content.includes('\n')) return;
+    const isCursorInside = cursorInside(sel, from, to);
+    const isMultiLine = content.includes('\n');
+
     mathRanges.push({ from, to });
-    widgets.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
+
+    if (isCursorInside) {
+      // Cursor inside - show source, no decoration
+      return;
+    }
+
+    if (isMultiLine) {
+      // Multi-line: hide source lines + show widget at end of first line
+      const startLine = state.doc.lineAt(from);
+      const endLine = state.doc.lineAt(to);
+
+      // Hide all lines in the block
+      for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum++) {
+        const line = state.doc.line(lineNum);
+        decos.push(Decoration.line({ class: 'cm-math-hidden' }).range(line.from));
+      }
+
+      // Show widget at the start position
+      decos.push(Decoration.widget({ widget, side: 1 }).range(from));
+    } else {
+      // Single-line: replace with widget
+      decos.push(Decoration.replace({ widget, inclusive: false }).range(from, to));
+    }
   }
 
   for (const env of MATH_ENVS) {
@@ -468,7 +491,7 @@ function computeMathDecorations(state) {
   const parenRe = /\\\(([\s\S]+?)\\\)/g;
   while ((m = parenRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), false), m[0]);
 
-  return Decoration.set(widgets, true);
+  return Decoration.set(decos, true);
 }
 
 const mathField = StateField.define({
