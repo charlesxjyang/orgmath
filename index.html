@@ -408,13 +408,10 @@ class LinkWidget extends WidgetType {
     a.className = 'cm-org-link';
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    // Prevent editor from capturing the click
-    a.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
     return a;
   }
-  ignoreEvent() { return false; }
+  // Let mouse events pass through to the link
+  ignoreEvent(e) { return e.type === 'mousedown' || e.type === 'click'; }
 }
 
 
@@ -627,11 +624,15 @@ function orgDecorations(view) {
     }
     // Org-mode links: [[url][label]] or [[url]]
     const sel = view.state.selection.main;
-    // Labeled links: [[url][label]]
+    // Helper to check if string is a URL
+    const isUrl = (s) => /^(https?:\/\/|file:\/\/|mailto:|ftp:\/\/)/.test(s);
+
+    // Labeled links: [[url][label]] - only if url looks like a URL
     const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
     while ((lm = lr.exec(text)) !== null) {
       const start = line.from + lm.index;
       const end = start + lm[0].length;
+      if (!isUrl(lm[1])) continue; // Skip non-URL links
       // Show raw syntax if cursor is inside
       if (sel.from >= start && sel.from <= end) {
         decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
@@ -639,11 +640,12 @@ function orgDecorations(view) {
         decos.push(Decoration.replace({ widget: new LinkWidget(lm[1], lm[2]) }).range(start, end));
       }
     }
-    // Bare links: [[url]]
+    // Bare links: [[url]] - only if url looks like a URL
     const blr = /\[\[([^\]]+)\]\](?!\[)/g; let blm;
     while ((blm = blr.exec(text)) !== null) {
       const start = line.from + blm.index;
       const end = start + blm[0].length;
+      if (!isUrl(blm[1])) continue; // Skip non-URL links
       if (sel.from >= start && sel.from <= end) {
         decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
       } else {
@@ -798,6 +800,31 @@ function tableEnter(view) {
   return true;
 }
 
+function bulletEnter(view) {
+  const cur = view.state.doc.lineAt(view.state.selection.main.head);
+  const bulletMatch = cur.text.match(/^(\s*)-\s+/);
+  if (!bulletMatch) return false;
+
+  const indent = bulletMatch[1];
+  const bulletPrefix = indent + '- ';
+
+  // If line is empty bullet (just "- "), remove it instead
+  if (cur.text.trim() === '-') {
+    view.dispatch({
+      changes: { from: cur.from, to: cur.to, insert: '' },
+      selection: { anchor: cur.from }
+    });
+    return true;
+  }
+
+  // Insert new bullet at same indentation
+  view.dispatch({
+    changes: { from: cur.to, insert: '\n' + bulletPrefix },
+    selection: { anchor: cur.to + 1 + bulletPrefix.length }
+  });
+  return true;
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 //  Org keybindings
@@ -829,6 +856,7 @@ const orgKeymap = keymap.of([
   { key: 'Tab', run: tableTab },
   { key: 'Shift-Tab', run: tableShiftTab },
   { key: 'Enter', run: tableEnter },
+  { key: 'Enter', run: bulletEnter },
   // Text formatting
   { key: 'Mod-b', run: (view) => wrapSelection(view, '*', '*') },
   { key: 'Mod-i', run: (view) => wrapSelection(view, '/', '/') },
