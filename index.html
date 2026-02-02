@@ -312,7 +312,7 @@
 <script type="module">
 import { EditorState, StateField } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view';
-import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { foldService, codeFolding, foldKeymap } from '@codemirror/language';
 import * as Y from 'yjs';
 import { yCollab } from 'y-codemirror.next';
@@ -948,11 +948,19 @@ function initEditor(room, username, serverUrl) {
 
     const undoManager = new Y.UndoManager(ytext);
 
+    // Yjs undo/redo keybindings
+    const yjsKeymap = keymap.of([
+      { key: 'Mod-z', run: () => { undoManager.undo(); return true; } },
+      { key: 'Mod-Shift-z', run: () => { undoManager.redo(); return true; } },
+      { key: 'Mod-y', run: () => { undoManager.redo(); return true; } },
+    ]);
+
     const state = EditorState.create({
       doc: ytext.toString(),
       extensions: [
         theme, orgPlugin, mathField, orgFoldService, codeFolding(), orgKeymap,
-        keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        yjsKeymap, // Yjs undo/redo - must come before defaultKeymap
+        keymap.of([...defaultKeymap, ...foldKeymap, indentWithTab]),
         yCollab(ytext, awareness, { undoManager }),
         EditorView.lineWrapping,
       ]
