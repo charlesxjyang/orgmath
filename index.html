@@ -527,7 +527,7 @@ function orgDecorations(view) {
       const dm = after.match(/^(DONE|CANCELLED)\s/);
       if (tm) decos.push(Decoration.mark({ class: 'cm-org-todo' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + tm[1].length));
       else if (dm) decos.push(Decoration.mark({ class: 'cm-org-done' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + dm[1].length));
-      continue;
+      // Don't continue - allow inline formatting to be processed
     }
 
     // Markdown headings: # Heading, ## Heading, etc.
@@ -538,7 +538,7 @@ function orgDecorations(view) {
       decos.push(Decoration.line({ class: cls }).range(line.from));
       // Hide the # markers and space
       decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + mdh[1].length + 1));
-      continue;
+      // Don't continue - allow inline formatting (bold, italic, etc.) to be processed
     }
 
     if (text.match(/^\s*\|/)) {
