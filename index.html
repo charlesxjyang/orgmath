@@ -388,6 +388,34 @@ btnExport.addEventListener('click', () => {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  Link Widget (for org-mode links)
+// ═══════════════════════════════════════════════════════════════
+
+class LinkWidget extends WidgetType {
+  constructor(url, label) {
+    super();
+    this.url = url;
+    this.label = label || url;
+  }
+  eq(other) { return other.url === this.url && other.label === this.label; }
+  toDOM() {
+    const a = document.createElement('a');
+    a.href = this.url;
+    a.textContent = this.label;
+    a.className = 'cm-org-link';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    // Prevent editor from capturing the click
+    a.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    return a;
+  }
+  ignoreEvent() { return false; }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  KaTeX Math Widget
 // ═══════════════════════════════════════════════════════════════
 
@@ -583,9 +611,31 @@ function orgDecorations(view) {
       decos.push(Decoration.mark({ class: 'cm-org-code' }).range(start + 1, start + cm[0].length - 1)); // style content
       decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + cm[0].length - 1, start + cm[0].length)); // hide ~ or =
     }
-    // Org-mode links: [[url][label]]
+    // Org-mode links: [[url][label]] or [[url]]
+    const sel = view.state.selection.main;
+    // Labeled links: [[url][label]]
     const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
-    while ((lm = lr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-link' }).range(line.from + lm.index, line.from + lm.index + lm[0].length));
+    while ((lm = lr.exec(text)) !== null) {
+      const start = line.from + lm.index;
+      const end = start + lm[0].length;
+      // Show raw syntax if cursor is inside
+      if (sel.from >= start && sel.from <= end) {
+        decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+      } else {
+        decos.push(Decoration.replace({ widget: new LinkWidget(lm[1], lm[2]) }).range(start, end));
+      }
+    }
+    // Bare links: [[url]]
+    const blr = /\[\[([^\]]+)\]\](?!\[)/g; let blm;
+    while ((blm = blr.exec(text)) !== null) {
+      const start = line.from + blm.index;
+      const end = start + blm[0].length;
+      if (sel.from >= start && sel.from <= end) {
+        decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+      } else {
+        decos.push(Decoration.replace({ widget: new LinkWidget(blm[1], blm[1]) }).range(start, end));
+      }
+    }
   }
   return Decoration.set(decos, true);
 }
