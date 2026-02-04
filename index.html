@@ -48,7 +48,8 @@
     "yjs": "https://esm.sh/yjs@13.6.15",
     "y-codemirror.next": "https://esm.sh/y-codemirror.next@0.3.5?external=yjs,@codemirror/state,@codemirror/view",
     "y-websocket": "https://esm.sh/y-websocket@2.0.4?external=yjs",
-    "lib0": "https://esm.sh/lib0@0.2.94"
+    "lib0": "https://esm.sh/lib0@0.2.94",
+    "@replit/codemirror-vim": "https://esm.sh/@replit/codemirror-vim@6.2.1?external=@codemirror/state,@codemirror/view,@codemirror/commands,@codemirror/language,@codemirror/search"
   }
 }
 </script>
@@ -137,6 +138,7 @@
   }
 
   .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  .toolbar button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 
   .status-bar { display: flex; align-items: center; gap: 12px; }
 
@@ -277,6 +279,8 @@
     <span class="conn-status connecting" id="connStatus">connecting…</span>
     <span class="room-label" id="roomLabel" title="Click to copy room URL"></span>
     <div class="toolbar">
+      <button id="btnViewMode" title="Cycle view mode: Edit / Rendered / Raw">Edit</button>
+      <button id="btnVim" title="Toggle Vim keybindings">Vim: Off</button>
       <button id="btnExport" title="Export as .org file">↓ .org</button>
       <button id="btnCheatsheet" title="Show keyboard shortcuts">?</button>
     </div>
@@ -315,6 +319,10 @@
   <kbd>Ctrl</kbd>+<kbd>Enter</kbd> new heading at same level<br>
   <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> toggle TODO<br>
   <kbd>Enter</kbd> on bullet continues list
+  <div class="sep"></div>
+  <h4>View Modes</h4>
+  Click toolbar button to cycle: Edit → Rendered → Raw<br>
+  <kbd>Vim</kbd> button toggles vim keybindings
 </div>
 
 <div class="modal-overlay" id="joinModal">
@@ -343,15 +351,47 @@
 </div>
 
 <script type="module">
-import { EditorState, StateField } from '@codemirror/state';
+import { EditorState, StateField, Compartment } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { foldService, codeFolding, foldKeymap } from '@codemirror/language';
 import * as Y from 'yjs';
 import { yCollab } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
+import { vim } from '@replit/codemirror-vim';
 
-// ─── Config ───
+// ─── Configuration ───
+const CONFIG = {
+  STORAGE_KEYS: {
+    viewMode: 'orgmath-view-mode',
+    vimEnabled: 'orgmath-vim'
+  },
+  VIEW_MODE_LABELS: {
+    edit: 'Edit',
+    rendered: 'Rendered',
+    raw: 'Raw'
+  }
+};
+
+// TODO/DONE keyword patterns for headings
+const KEYWORDS = {
+  TODO: /^(TODO|FIXME|HACK|NEXT)\s/,
+  DONE: /^(DONE|CANCELLED)\s/
+};
+
+// Inline formatting regex patterns
+// *bold* - not on heading lines, word boundaries
+// /italic/ - word boundaries
+// ~code~ or =verbatim= - word boundaries
+const INLINE_PATTERNS = {
+  bold: /(?<!\w)(?<!\*)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\*)(?!\w)/g,
+  italic: /(?<!\w)\/([^\s/](?:[^/]*[^\s/])?)\/(?!\w)/g,
+  code: /(?<!\w)[~=]([^\s~=](?:[^~=]*[^\s~=])?)[~=](?!\w)/g
+};
+
+// TODO state cycle: '' -> 'TODO ' -> 'DONE ' -> ''
+const TODO_CYCLE = { '': 'TODO ', 'TODO': 'DONE ', 'DONE': '' };
+
 // Detect default server: same host on port 4000, or override via query param
 const params = new URLSearchParams(location.search);
 const DEFAULT_SERVER = params.get('server') ||
@@ -375,6 +415,8 @@ const connStatus = document.getElementById('connStatus');
 const cheatsheet = document.getElementById('cheatsheet');
 const btnCheatsheet = document.getElementById('btnCheatsheet');
 const btnExport = document.getElementById('btnExport');
+const btnViewMode = document.getElementById('btnViewMode');
+const btnVim = document.getElementById('btnVim');
 
 // Pre-fill from URL
 const hashRoom = location.hash.slice(1);
@@ -391,6 +433,57 @@ roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.fo
 nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startEditor(); });
 
 let editorView = null;
+
+// View mode & Vim state
+const VIEW_MODES = ['edit', 'rendered', 'raw'];
+let currentViewMode = localStorage.getItem(CONFIG.STORAGE_KEYS.viewMode) || 'edit';
+let vimEnabled = localStorage.getItem(CONFIG.STORAGE_KEYS.vimEnabled) === 'true';
+
+// Compartments for dynamic extension swapping
+const vimCompartment = new Compartment();
+const orgCompartment = new Compartment();
+
+function updateViewModeUI() {
+  btnViewMode.textContent = CONFIG.VIEW_MODE_LABELS[currentViewMode];
+  btnViewMode.classList.toggle('active', currentViewMode !== 'edit');
+}
+
+function updateVimUI() {
+  btnVim.textContent = vimEnabled ? 'Vim: On' : 'Vim: Off';
+  btnVim.classList.toggle('active', vimEnabled);
+}
+
+function setViewMode(mode) {
+  if (!editorView || !VIEW_MODES.includes(mode)) return;
+  currentViewMode = mode;
+  localStorage.setItem(CONFIG.STORAGE_KEYS.viewMode, mode);
+  editorView.dispatch({
+    effects: orgCompartment.reconfigure(getOrgExtensions(mode))
+  });
+  updateViewModeUI();
+}
+
+function toggleVim() {
+  if (!editorView) return;
+  vimEnabled = !vimEnabled;
+  localStorage.setItem(CONFIG.STORAGE_KEYS.vimEnabled, String(vimEnabled));
+  editorView.dispatch({
+    effects: vimCompartment.reconfigure(getVimExtension(vimEnabled))
+  });
+  updateVimUI();
+}
+
+// Event handlers for view mode and vim buttons
+btnViewMode.addEventListener('click', () => {
+  const idx = VIEW_MODES.indexOf(currentViewMode);
+  setViewMode(VIEW_MODES[(idx + 1) % VIEW_MODES.length]);
+});
+
+btnVim.addEventListener('click', toggleVim);
+
+// Initialize UI state on load
+updateViewModeUI();
+updateVimUI();
 
 function startEditor() {
   const room = roomInput.value.trim() || 'default-room';
@@ -490,23 +583,23 @@ function cursorInside(sel, from, to) {
   return (sel.from >= from && sel.from <= to) || (sel.to >= from && sel.to <= to);
 }
 
-function computeMathDecorations(state) {
+function computeMathDecorations(state, skipCursorCheck = false) {
   const decos = [];
   const doc = state.doc.toString();
-  const sel = state.selection.main;
+  const sel = skipCursorCheck ? null : state.selection.main;
   const mathRanges = [];
 
+  // Multi-line math: Hide all source lines, show rendered widget at block start.
+  // This prevents raw LaTeX from showing while allowing equations to span lines.
   function addMath(from, to, widget, content) {
+    // Skip if overlapping with already-processed math range
     for (const r of mathRanges) { if (from < r.to && to > r.from) return; }
-    const isCursorInside = cursorInside(sel, from, to);
     const isMultiLine = content.includes('\n');
 
     mathRanges.push({ from, to });
 
-    if (isCursorInside) {
-      // Cursor inside - show source, no decoration
-      return;
-    }
+    // Cursor inside - show source, no decoration
+    if (!skipCursorCheck && cursorInside(sel, from, to)) return;
 
     if (isMultiLine) {
       // Multi-line: hide source lines + show widget at end of first line
@@ -537,15 +630,21 @@ function computeMathDecorations(state) {
   }
 
   let m;
+  // Display math: $$...$$ (can span multiple lines)
   const blockRe = /\$\$([\s\S]+?)\$\$/g;
   while ((m = blockRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true), m[0]);
 
+  // Display math: \[...\] (can span multiple lines)
   const bracketRe = /\\\[([\s\S]+?)\\\]/g;
   while ((m = bracketRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), true), m[0]);
 
+  // Inline math: $...$ but NOT display math $$...$$
+  // (?<!\$) = negative lookbehind (not preceded by $)
+  // (?!\$) = negative lookahead (not followed by $)
   const inlineRe = /(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)/g;
   while ((m = inlineRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1], false), m[0]);
 
+  // Inline math: \(...\)
   const parenRe = /\\\(([\s\S]+?)\\\)/g;
   while ((m = parenRe.exec(doc)) !== null) addMath(m.index, m.index + m[0].length, new MathWidget(m[1].trim(), false), m[0]);
 
@@ -561,132 +660,219 @@ const mathField = StateField.define({
   provide: f => EditorView.decorations.from(f)
 });
 
+const mathFieldRendered = StateField.define({
+  create(state) { return computeMathDecorations(state, true); },
+  update(decos, tr) {
+    if (tr.docChanged) return computeMathDecorations(tr.state, true);
+    return decos;
+  },
+  provide: f => EditorView.decorations.from(f)
+});
+
 
 // ═══════════════════════════════════════════════════════════════
-//  Org decorations
+//  Org decorations - Helper functions
 // ═══════════════════════════════════════════════════════════════
 
-function orgDecorations(view) {
+/**
+ * Apply decoration to inline markup (bold, italic, code).
+ * Hides delimiters and applies styling to content.
+ */
+function decorateInlineMarkup(text, line, pattern, className, decos) {
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const start = line.from + match.index;
+    const end = start + match[0].length;
+    decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1));
+    decos.push(Decoration.mark({ class: className }).range(start + 1, end - 1));
+    decos.push(Decoration.mark({ class: 'cm-hide' }).range(end - 1, end));
+  }
+}
+
+/**
+ * Decorate org-mode links with widgets or styling.
+ * In edit mode, cursor inside link shows raw syntax.
+ */
+function decorateLinks(text, line, sel, mode, decos) {
+  const isUrl = (s) => /^(https?:\/\/|file:\/\/|mailto:|ftp:\/\/)/.test(s);
+
+  // Labeled links: [[url][label]]
+  const labeledPattern = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g;
+  let match;
+  while ((match = labeledPattern.exec(text)) !== null) {
+    const url = match[1], label = match[2];
+    if (!isUrl(url)) continue;
+
+    const start = line.from + match.index;
+    const end = start + match[0].length;
+    const cursorInside = mode === 'edit' && sel && sel.from >= start && sel.from <= end;
+
+    if (cursorInside) {
+      decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+    } else {
+      decos.push(Decoration.replace({ widget: new LinkWidget(url, label) }).range(start, end));
+    }
+  }
+
+  // Bare links: [[url]]
+  const barePattern = /\[\[([^\]]+)\]\](?!\[)/g;
+  while ((match = barePattern.exec(text)) !== null) {
+    const url = match[1];
+    if (!isUrl(url)) continue;
+
+    const start = line.from + match.index;
+    const end = start + match[0].length;
+    const cursorInside = mode === 'edit' && sel && sel.from >= start && sel.from <= end;
+
+    if (cursorInside) {
+      decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+    } else {
+      decos.push(Decoration.replace({ widget: new LinkWidget(url, url) }).range(start, end));
+    }
+  }
+}
+
+/**
+ * Decorate org-mode headings (* Heading, ** Heading, etc.)
+ * Hides stars, applies heading styles, handles TODO/DONE keywords.
+ */
+function decorateHeading(text, line, decos) {
+  const headingMatch = text.match(/^(\*{1,6})\s+(.*)$/);
+  if (!headingMatch) return false;
+
+  const level = headingMatch[1].length;
+  const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
+
+  decos.push(Decoration.line({ class: cls }).range(line.from));
+  decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + headingMatch[1].length + 1));
+
+  const afterStars = text.slice(headingMatch[1].length + 1);
+  const todoMatch = afterStars.match(KEYWORDS.TODO);
+  const doneMatch = afterStars.match(KEYWORDS.DONE);
+
+  if (todoMatch) {
+    const keywordStart = line.from + headingMatch[1].length + 1;
+    decos.push(Decoration.mark({ class: 'cm-org-todo' }).range(keywordStart, keywordStart + todoMatch[1].length));
+  } else if (doneMatch) {
+    const keywordStart = line.from + headingMatch[1].length + 1;
+    decos.push(Decoration.mark({ class: 'cm-org-done' }).range(keywordStart, keywordStart + doneMatch[1].length));
+  }
+
+  return true;
+}
+
+/**
+ * Decorate org-mode table lines.
+ * Returns true if line was a table line (to skip further processing).
+ */
+function decorateTableLine(text, line, decos) {
+  if (!text.match(/^\s*\|/)) return false;
+
+  const isSeparator = text.match(/^\s*\|[-+|]+\|\s*$/);
+  decos.push(Decoration.line({
+    class: isSeparator ? 'cm-org-table-separator' : 'cm-org-table-line'
+  }).range(line.from));
+
+  if (!isSeparator) {
+    const pipePattern = /\|/g;
+    let pipeMatch;
+    while ((pipeMatch = pipePattern.exec(text)) !== null) {
+      decos.push(Decoration.mark({ class: 'cm-org-table-pipe' })
+        .range(line.from + pipeMatch.index, line.from + pipeMatch.index + 1));
+    }
+  }
+
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Org decorations - Main function
+// ═══════════════════════════════════════════════════════════════
+
+function orgDecorations(view, mode = 'edit') {
   const decos = [];
   const doc = view.state.doc;
+  const sel = mode === 'edit' ? view.state.selection.main : null;
+
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i);
     const text = line.text;
 
-    // Org-mode headings: * Heading
-    const hm = text.match(/^(\*{1,6})\s+(.*)$/);
-    if (hm) {
-      const level = hm[1].length;
-      const cls = level === 1 ? 'cm-org-h1' : level === 2 ? 'cm-org-h2' : 'cm-org-h3';
-      decos.push(Decoration.line({ class: cls }).range(line.from));
-      // Hide the * markers and space
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + hm[1].length + 1));
-      const after = text.slice(hm[1].length + 1);
-      const tm = after.match(/^(TODO|FIXME|HACK|NEXT)\s/);
-      const dm = after.match(/^(DONE|CANCELLED)\s/);
-      if (tm) decos.push(Decoration.mark({ class: 'cm-org-todo' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + tm[1].length));
-      else if (dm) decos.push(Decoration.mark({ class: 'cm-org-done' }).range(line.from + hm[1].length + 1, line.from + hm[1].length + 1 + dm[1].length));
-      // Don't continue - allow inline formatting to be processed
-    }
+    // Headings (allows inline formatting to continue)
+    decorateHeading(text, line, decos);
 
     // Bullet points: - item only (org-mode style)
-    const bullet = text.match(/^(\s*)-\s+/);
-    if (bullet) {
+    const bulletMatch = text.match(/^(\s*)-\s+/);
+    if (bulletMatch) {
       decos.push(Decoration.line({ class: 'cm-bullet-line' }).range(line.from));
-      // Hide the dash, show bullet via CSS
-      const markerStart = line.from + bullet[1].length;
+      const markerStart = line.from + bulletMatch[1].length;
       decos.push(Decoration.mark({ class: 'cm-bullet' }).range(markerStart, markerStart + 1));
     }
 
-    if (text.match(/^\s*\|/)) {
-      if (text.match(/^\s*\|[-+|]+\|\s*$/)) {
-        decos.push(Decoration.line({ class: 'cm-org-table-separator' }).range(line.from));
-      } else {
-        decos.push(Decoration.line({ class: 'cm-org-table-line' }).range(line.from));
-        const pr = /\|/g; let pm;
-        while ((pm = pr.exec(text)) !== null) decos.push(Decoration.mark({ class: 'cm-org-table-pipe' }).range(line.from + pm.index, line.from + pm.index + 1));
-      }
+    // Tables (skip other processing for table lines)
+    if (decorateTableLine(text, line, decos)) continue;
+
+    // Property drawers
+    if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) {
+      decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from));
       continue;
     }
-
-    if (text.match(/^\s*:[A-Z_]+:\s*$/) || text.match(/^\s*:END:\s*$/)) { decos.push(Decoration.line({ class: 'cm-org-property' }).range(line.from)); continue; }
 
     // #+TITLE: displayed as document title
     const titleMatch = text.match(/^#\+TITLE:\s*(.*)$/i);
     if (titleMatch) {
       decos.push(Decoration.line({ class: 'cm-org-title' }).range(line.from));
-      // Hide #+TITLE: prefix
       decos.push(Decoration.mark({ class: 'cm-hide' }).range(line.from, line.from + 8));
       continue;
     }
 
     // Other #+KEYWORD: lines
-    if (text.match(/^\s*#\+/i)) { decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from)); continue; }
+    if (text.match(/^\s*#\+/i)) {
+      decos.push(Decoration.line({ class: 'cm-org-block-delimiter' }).range(line.from));
+      continue;
+    }
 
-    // Org-mode bold: *text* (but not on heading lines)
+    // Inline formatting (bold, italic, code)
     if (!text.match(/^\*+\s/)) {
-      const br = /(?<!\w)(?<!\*)\*([^\s*](?:[^*]*[^\s*])?)\*(?!\*)(?!\w)/g; let bm;
-      while ((bm = br.exec(text)) !== null) {
-        const start = line.from + bm.index;
-        decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide *
-        decos.push(Decoration.mark({ class: 'cm-org-bold' }).range(start + 1, start + bm[0].length - 1)); // style content
-        decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + bm[0].length - 1, start + bm[0].length)); // hide *
-      }
+      decorateInlineMarkup(text, line, new RegExp(INLINE_PATTERNS.bold.source, 'g'), 'cm-org-bold', decos);
     }
-    // Org-mode italic: /text/
-    const ir = /(?<!\w)\/([^\s/](?:[^/]*[^\s/])?)\/(?!\w)/g; let im;
-    while ((im = ir.exec(text)) !== null) {
-      const start = line.from + im.index;
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide /
-      decos.push(Decoration.mark({ class: 'cm-org-italic' }).range(start + 1, start + im[0].length - 1)); // style content
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + im[0].length - 1, start + im[0].length)); // hide /
-    }
-    // Org-mode code: ~text~ or =text=
-    const cr = /(?<!\w)[~=]([^\s~=](?:[^~=]*[^\s~=])?)[~=](?!\w)/g; let cm;
-    while ((cm = cr.exec(text)) !== null) {
-      const start = line.from + cm.index;
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start, start + 1)); // hide ~ or =
-      decos.push(Decoration.mark({ class: 'cm-org-code' }).range(start + 1, start + cm[0].length - 1)); // style content
-      decos.push(Decoration.mark({ class: 'cm-hide' }).range(start + cm[0].length - 1, start + cm[0].length)); // hide ~ or =
-    }
-    // Org-mode links: [[url][label]] or [[url]]
-    const sel = view.state.selection.main;
-    // Helper to check if string is a URL
-    const isUrl = (s) => /^(https?:\/\/|file:\/\/|mailto:|ftp:\/\/)/.test(s);
+    decorateInlineMarkup(text, line, new RegExp(INLINE_PATTERNS.italic.source, 'g'), 'cm-org-italic', decos);
+    decorateInlineMarkup(text, line, new RegExp(INLINE_PATTERNS.code.source, 'g'), 'cm-org-code', decos);
 
-    // Labeled links: [[url][label]] - only if url looks like a URL
-    const lr = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g; let lm;
-    while ((lm = lr.exec(text)) !== null) {
-      const start = line.from + lm.index;
-      const end = start + lm[0].length;
-      if (!isUrl(lm[1])) continue; // Skip non-URL links
-      // Show raw syntax if cursor is inside
-      if (sel.from >= start && sel.from <= end) {
-        decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
-      } else {
-        decos.push(Decoration.replace({ widget: new LinkWidget(lm[1], lm[2]) }).range(start, end));
-      }
-    }
-    // Bare links: [[url]] - only if url looks like a URL
-    const blr = /\[\[([^\]]+)\]\](?!\[)/g; let blm;
-    while ((blm = blr.exec(text)) !== null) {
-      const start = line.from + blm.index;
-      const end = start + blm[0].length;
-      if (!isUrl(blm[1])) continue; // Skip non-URL links
-      if (sel.from >= start && sel.from <= end) {
-        decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
-      } else {
-        decos.push(Decoration.replace({ widget: new LinkWidget(blm[1], blm[1]) }).range(start, end));
-      }
-    }
+    // Links
+    decorateLinks(text, line, sel, mode, decos);
   }
+
   return Decoration.set(decos, true);
 }
 
 const orgPlugin = ViewPlugin.fromClass(class {
-  constructor(view) { this.decorations = orgDecorations(view); }
-  update(update) { if (update.docChanged || update.viewportChanged) this.decorations = orgDecorations(update.view); }
+  constructor(view) { this.decorations = orgDecorations(view, 'edit'); }
+  update(update) {
+    if (update.docChanged || update.viewportChanged || update.selectionSet)
+      this.decorations = orgDecorations(update.view, 'edit');
+  }
 }, { decorations: v => v.decorations });
+
+const orgPluginRendered = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = orgDecorations(view, 'rendered'); }
+  update(update) {
+    if (update.docChanged || update.viewportChanged)
+      this.decorations = orgDecorations(update.view, 'rendered');
+  }
+}, { decorations: v => v.decorations });
+
+function getOrgExtensions(mode) {
+  switch (mode) {
+    case 'rendered': return [orgPluginRendered, mathFieldRendered];
+    case 'edit':     return [orgPlugin, mathField];
+    case 'raw':      return [];
+  }
+}
+
+function getVimExtension(enabled) {
+  return enabled ? vim() : [];
+}
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -714,8 +900,9 @@ const orgFoldService = foldService.of((state, lineStart) => {
 //  Org tables
 // ═══════════════════════════════════════════════════════════════
 
-function isTableLine(t) { return /^\s*\|/.test(t); }
-function isSepLine(t) { return /^\s*\|[-+|]+\|\s*$/.test(t); }
+// Table line detection
+function isTableLine(text) { return /^\s*\|/.test(text); }
+function isSepLine(text) { return /^\s*\|[-+|]+\|\s*$/.test(text); }
 function parseRow(t) {
   const tr = t.trim();
   if (!tr.startsWith('|') || !tr.endsWith('|')) return null;
@@ -774,54 +961,91 @@ function cellPos(doc, tableStart, lineIdx, cellIdx, w) {
   return line.from + off + 1;
 }
 
+/**
+ * Handle Tab in tables: move to next cell, or add new row at end.
+ * 1. Realign table (format/pad cells)
+ * 2. Calculate next cell position
+ * 3. Wrap to next row if past last column
+ * 4. Insert new row if past last row
+ */
 function tableTab(view) {
-  const cur = view.state.doc.lineAt(view.state.selection.main.head);
-  if (!isTableLine(cur.text) || isSepLine(cur.text)) return false;
-  const r = realignTable(view); if (!r) return false;
-  let { from, to, newText, curLineIdx, cellIdx, widths } = r;
-  const tsl = view.state.doc.lineAt(from).number;
-  let nli = curLineIdx, nci = cellIdx + 1;
-  if (nci >= widths.length) {
-    nci = 0; nli++;
-    const nl = newText.split('\n');
-    while (nli < nl.length && isSepLine(nl[nli])) nli++;
-    if (nli >= nl.length) {
-      const nr = fmtRow(widths.map(() => ''), widths);
-      view.dispatch({ changes: { from, to, insert: newText + '\n' + nr } });
-      const ns = view.state, ntsl = ns.doc.lineAt(from).number;
-      view.dispatch({ selection: { anchor: ns.doc.line(ntsl + nli).from + 2 } });
+  const curLine = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(curLine.text) || isSepLine(curLine.text)) return false;
+  const result = realignTable(view);
+  if (!result) return false;
+  let { from, to, newText, curLineIdx, cellIdx, widths } = result;
+
+  let nextLineIdx = curLineIdx;
+  let nextCellIdx = cellIdx + 1;
+
+  // Wrap to next row if past last column
+  if (nextCellIdx >= widths.length) {
+    nextCellIdx = 0;
+    nextLineIdx++;
+    const lines = newText.split('\n');
+    // Skip separator lines
+    while (nextLineIdx < lines.length && isSepLine(lines[nextLineIdx])) nextLineIdx++;
+    // Insert new row if past last row
+    if (nextLineIdx >= lines.length) {
+      const newRow = fmtRow(widths.map(() => ''), widths);
+      view.dispatch({ changes: { from, to, insert: newText + '\n' + newRow } });
+      const newState = view.state;
+      const tableStartLine = newState.doc.lineAt(from).number;
+      view.dispatch({ selection: { anchor: newState.doc.line(tableStartLine + nextLineIdx).from + 2 } });
       return true;
     }
   }
+
   view.dispatch({ changes: { from, to, insert: newText } });
-  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, nli, nci, widths) } });
+  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, nextLineIdx, nextCellIdx, widths) } });
   return true;
 }
 
+/**
+ * Handle Shift+Tab in tables: move to previous cell.
+ * Wraps to previous row if at first column.
+ */
 function tableShiftTab(view) {
-  const cur = view.state.doc.lineAt(view.state.selection.main.head);
-  if (!isTableLine(cur.text) || isSepLine(cur.text)) return false;
-  const r = realignTable(view); if (!r) return false;
-  let { from, to, newText, curLineIdx, cellIdx, widths } = r;
-  let pli = curLineIdx, pci = cellIdx - 1;
-  if (pci < 0) {
-    pci = widths.length - 1; pli--;
-    const nl = newText.split('\n');
-    while (pli >= 0 && isSepLine(nl[pli])) pli--;
-    if (pli < 0) { pli = 0; pci = 0; }
+  const curLine = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(curLine.text) || isSepLine(curLine.text)) return false;
+  const result = realignTable(view);
+  if (!result) return false;
+  let { from, to, newText, curLineIdx, cellIdx, widths } = result;
+
+  let prevLineIdx = curLineIdx;
+  let prevCellIdx = cellIdx - 1;
+
+  // Wrap to previous row if at first column
+  if (prevCellIdx < 0) {
+    prevCellIdx = widths.length - 1;
+    prevLineIdx--;
+    const lines = newText.split('\n');
+    // Skip separator lines
+    while (prevLineIdx >= 0 && isSepLine(lines[prevLineIdx])) prevLineIdx--;
+    // Stay at first cell if at beginning
+    if (prevLineIdx < 0) {
+      prevLineIdx = 0;
+      prevCellIdx = 0;
+    }
   }
+
   view.dispatch({ changes: { from, to, insert: newText } });
-  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, pli, pci, widths) } });
+  view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, prevLineIdx, prevCellIdx, widths) } });
   return true;
 }
 
+/**
+ * Handle Enter in tables: insert new row below current.
+ */
 function tableEnter(view) {
-  const cur = view.state.doc.lineAt(view.state.selection.main.head);
-  if (!isTableLine(cur.text)) return false;
-  const r = realignTable(view); if (!r) return false;
-  const { from, to, newText, curLineIdx, widths } = r;
+  const curLine = view.state.doc.lineAt(view.state.selection.main.head);
+  if (!isTableLine(curLine.text)) return false;
+  const result = realignTable(view);
+  if (!result) return false;
+  const { from, to, newText, curLineIdx, widths } = result;
   const lines = newText.split('\n');
-  lines.splice(curLineIdx + 1, 0, fmtRow(widths.map(() => ''), widths));
+  const newRow = fmtRow(widths.map(() => ''), widths);
+  lines.splice(curLineIdx + 1, 0, newRow);
   view.dispatch({ changes: { from, to, insert: lines.join('\n') } });
   view.dispatch({ selection: { anchor: cellPos(view.state.doc, view.state.doc.lineAt(from).number, curLineIdx + 1, 0, widths) } });
   return true;
@@ -910,13 +1134,15 @@ const orgKeymap = keymap.of([
     }
   },
   {
+    // Toggle TODO state: '' -> 'TODO' -> 'DONE' -> ''
     key: 'Ctrl-Shift-Enter', run(view) {
-      const l = view.state.doc.lineAt(view.state.selection.main.head);
-      const m = l.text.match(/^(\*{1,6})\s+(TODO |DONE )?(.*)$/);
-      if (!m) return false;
-      const cur = (m[2] || '').trim();
-      const next = !cur ? 'TODO ' : cur === 'TODO' ? 'DONE ' : '';
-      view.dispatch({ changes: { from: l.from, to: l.to, insert: m[1] + ' ' + next + m[3] } }); return true;
+      const line = view.state.doc.lineAt(view.state.selection.main.head);
+      const match = line.text.match(/^(\*{1,6})\s+(TODO |DONE )?(.*)$/);
+      if (!match) return false;
+      const currentKeyword = (match[2] || '').trim();
+      const nextKeyword = TODO_CYCLE[currentKeyword] ?? '';
+      view.dispatch({ changes: { from: line.from, to: line.to, insert: match[1] + ' ' + nextKeyword + match[3] } });
+      return true;
     }
   }
 ]);
@@ -1049,7 +1275,10 @@ function initEditor(room, username, serverUrl) {
     const state = EditorState.create({
       doc: ytext.toString(),
       extensions: [
-        theme, orgPlugin, mathField, orgFoldService, codeFolding(), orgKeymap,
+        theme,
+        vimCompartment.of(getVimExtension(vimEnabled)),
+        orgCompartment.of(getOrgExtensions(currentViewMode)),
+        orgFoldService, codeFolding(), orgKeymap,
         yjsKeymap, // Yjs undo/redo - must come before defaultKeymap
         keymap.of([...defaultKeymap, ...foldKeymap, indentWithTab]),
         yCollab(ytext, awareness, { undoManager }),
