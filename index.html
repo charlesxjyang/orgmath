@@ -209,6 +209,8 @@
   .cm-org-italic { font-style: italic; }
   .cm-org-code { font-family: var(--font-mono); font-size: 0.88em; background: var(--bg-sidebar); padding: 1px 5px; border-radius: 3px; color: var(--accent); }
   .cm-org-link { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-dim); text-underline-offset: 2px; }
+  .cm-org-internal-link { color: var(--accent); text-decoration: underline; text-decoration-style: dashed; text-decoration-color: var(--accent-dim); text-underline-offset: 2px; }
+  .cm-org-internal-link:hover { text-decoration-style: solid; }
   .cm-org-property { font-family: var(--font-mono); font-size: 0.8em; color: var(--fg-faint); }
   .cm-org-block-delimiter { font-family: var(--font-mono); font-size: 0.8em; color: var(--fg-faint); }
   .cm-org-table-line { font-family: var(--font-mono); font-size: 0.88em; line-height: 1.6; }
@@ -502,8 +504,24 @@ btnExport.addEventListener('click', () => {
 
 
 // ═══════════════════════════════════════════════════════════════
-//  Link Widget (for org-mode links)
+//  Link Widgets (for org-mode links)
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * Build a map of named anchors in the document.
+ * Scans for #+name: declarations and returns { name -> lineNumber }
+ */
+function buildAnchorMap(doc) {
+  const anchors = new Map();
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    const match = line.text.match(/^\s*#\+name:\s*(.+)$/i);
+    if (match) {
+      anchors.set(match[1].trim(), i);
+    }
+  }
+  return anchors;
+}
 
 class LinkWidget extends WidgetType {
   constructor(url, label) {
@@ -522,6 +540,38 @@ class LinkWidget extends WidgetType {
     return a;
   }
   // Let mouse events pass through to the link
+  ignoreEvent(e) { return e.type === 'mousedown' || e.type === 'click'; }
+}
+
+class InternalLinkWidget extends WidgetType {
+  constructor(target, label, view) {
+    super();
+    this.target = target;
+    this.label = label || target;
+    this.view = view;
+  }
+  eq(other) { return other.target === this.target && other.label === this.label; }
+  toDOM() {
+    const span = document.createElement('span');
+    span.textContent = this.label;
+    span.className = 'cm-org-internal-link';
+    span.title = `Jump to: ${this.target}`;
+    span.style.cursor = 'pointer';
+    span.addEventListener('click', () => this.jumpToTarget());
+    return span;
+  }
+  jumpToTarget() {
+    const anchors = buildAnchorMap(this.view.state.doc);
+    const lineNum = anchors.get(this.target);
+    if (lineNum) {
+      const line = this.view.state.doc.line(lineNum);
+      this.view.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+      });
+      this.view.focus();
+    }
+  }
   ignoreEvent(e) { return e.type === 'mousedown' || e.type === 'click'; }
 }
 
@@ -683,42 +733,45 @@ function decorateInlineMarkup(text, line, pattern, className, decos) {
 /**
  * Decorate org-mode links with widgets or styling.
  * In edit mode, cursor inside link shows raw syntax.
+ * Handles both external URLs and internal links (#+name: anchors).
  */
-function decorateLinks(text, line, sel, mode, decos) {
+function decorateLinks(text, line, sel, mode, decos, view) {
   const isUrl = (s) => /^(https?:\/\/|file:\/\/|mailto:|ftp:\/\/)/.test(s);
 
-  // Labeled links: [[url][label]]
+  // Labeled links: [[target][label]]
   const labeledPattern = /\[\[([^\]]+)\]\[([^\]]+)\]\]/g;
   let match;
   while ((match = labeledPattern.exec(text)) !== null) {
-    const url = match[1], label = match[2];
-    if (!isUrl(url)) continue;
-
+    const target = match[1], label = match[2];
     const start = line.from + match.index;
     const end = start + match[0].length;
     const cursorInside = mode === 'edit' && sel && sel.from >= start && sel.from <= end;
 
     if (cursorInside) {
       decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+    } else if (isUrl(target)) {
+      decos.push(Decoration.replace({ widget: new LinkWidget(target, label) }).range(start, end));
     } else {
-      decos.push(Decoration.replace({ widget: new LinkWidget(url, label) }).range(start, end));
+      // Internal link
+      decos.push(Decoration.replace({ widget: new InternalLinkWidget(target, label, view) }).range(start, end));
     }
   }
 
-  // Bare links: [[url]]
+  // Bare links: [[target]]
   const barePattern = /\[\[([^\]]+)\]\](?!\[)/g;
   while ((match = barePattern.exec(text)) !== null) {
-    const url = match[1];
-    if (!isUrl(url)) continue;
-
+    const target = match[1];
     const start = line.from + match.index;
     const end = start + match[0].length;
     const cursorInside = mode === 'edit' && sel && sel.from >= start && sel.from <= end;
 
     if (cursorInside) {
       decos.push(Decoration.mark({ class: 'cm-org-link' }).range(start, end));
+    } else if (isUrl(target)) {
+      decos.push(Decoration.replace({ widget: new LinkWidget(target, target) }).range(start, end));
     } else {
-      decos.push(Decoration.replace({ widget: new LinkWidget(url, url) }).range(start, end));
+      // Internal link
+      decos.push(Decoration.replace({ widget: new InternalLinkWidget(target, target, view) }).range(start, end));
     }
   }
 }
@@ -831,7 +884,7 @@ function orgDecorations(view, mode = 'edit') {
     decorateInlineMarkup(text, line, new RegExp(INLINE_PATTERNS.code.source, 'g'), 'cm-org-code', decos);
 
     // Links
-    decorateLinks(text, line, sel, mode, decos);
+    decorateLinks(text, line, sel, mode, decos, view);
   }
 
   return Decoration.set(decos, true);
