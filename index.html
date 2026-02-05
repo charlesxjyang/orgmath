@@ -438,7 +438,7 @@ const orgCompartment = new Compartment();
 
 function updateViewModeUI() {
   btnViewMode.textContent = CONFIG.VIEW_MODE_LABELS[currentViewMode];
-  btnViewMode.classList.toggle('active', currentViewMode !== 'edit');
+  btnViewMode.classList.add('active');
 }
 
 function updateVimUI() {
@@ -557,7 +557,11 @@ class InternalLinkWidget extends WidgetType {
     span.className = 'cm-org-internal-link';
     span.title = `Jump to: ${this.target}`;
     span.style.cursor = 'pointer';
-    span.addEventListener('click', () => this.jumpToTarget());
+    span.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.jumpToTarget();
+    });
     return span;
   }
   jumpToTarget() {
